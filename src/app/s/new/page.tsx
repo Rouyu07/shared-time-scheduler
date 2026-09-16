@@ -4,7 +4,8 @@ import Link from "next/link";
 import { api } from "@/lib/client";
 export default function NewSchedule() {
   const [error, setError] = useState(""),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [created, setCreated] = useState<{
     publicId: string;
     adminLink: string;
@@ -12,10 +13,50 @@ export default function NewSchedule() {
   const [copied, setCopied] = useState("");
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
+    const data = Object.fromEntries(new FormData(form));
+    const nextErrors: Record<string, string> = {};
+    const required = (name: string, message: string) => {
+      if (!String(data[name] ?? "").trim()) nextErrors[name] = message;
+    };
+    required("title", "請輸入排程名稱。");
+    required("creatorName", "請輸入你的顯示名稱。");
+    required("startDate", "請選擇開始日期。");
+    required("endDate", "請選擇結束日期。");
+    required("dailyStartTime", "請選擇每日開始時間。");
+    required("dailyEndTime", "請選擇每日結束時間。");
+    required("timezone", "請輸入 IANA 時區。");
+    const expected = Number(data.expectedParticipants);
+    if (!Number.isInteger(expected) || expected < 1 || expected > 100)
+      nextErrors.expectedParticipants = "總人數需為 1 至 100 人。";
+    if (data.startDate && data.endDate) {
+      const days =
+        (Date.parse(String(data.endDate)) - Date.parse(String(data.startDate))) /
+        86400000;
+      if (days < 0) nextErrors.endDate = "結束日期不可早於開始日期。";
+      else if (days > 30) nextErrors.endDate = "日期範圍最多 31 天。";
+    }
+    if (data.dailyStartTime && data.dailyEndTime) {
+      const minutes = (value: FormDataEntryValue) => {
+        const [hour, minute] = String(value).split(":").map(Number);
+        return hour * 60 + minute;
+      };
+      if (
+        minutes(data.dailyEndTime) - minutes(data.dailyStartTime) <
+        Number(data.durationMinutes)
+      )
+        nextErrors.dailyEndTime = "結束時間需晚於開始時間，且可容納完整會議。";
+    }
+    setFieldErrors(nextErrors);
+    const firstInvalid = Object.keys(nextErrors)[0];
+    if (firstInvalid) {
+      (form.elements.namedItem(firstInvalid) as HTMLElement | null)?.focus();
+      setError("請修正標示的欄位後再建立排程。");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      const data = Object.fromEntries(new FormData(event.currentTarget));
       setCreated(await api("", "POST", data));
     } catch (e) {
       setError((e as Error).message);
@@ -23,6 +64,16 @@ export default function NewSchedule() {
       setBusy(false);
     }
   }
+  const fieldError = (name: string) =>
+    fieldErrors[name] ? (
+      <span className="field-error" id={`${name}-error`}>
+        {fieldErrors[name]}
+      </span>
+    ) : null;
+  const invalidProps = (name: string) => ({
+    "aria-invalid": !!fieldErrors[name],
+    "aria-describedby": fieldErrors[name] ? `${name}-error` : undefined,
+  });
   async function copy(value: string, label: string) {
     try {
       await navigator.clipboard.writeText(location.origin + value);
@@ -142,7 +193,7 @@ export default function NewSchedule() {
           THOUGHTFULLY BUILT BY <b>REX</b>
         </div>
       </aside>
-      <form onSubmit={submit} className="card form">
+      <form onSubmit={submit} className="card form" noValidate>
         <h2>
           <span className="section-number">01</span> 這次要一起做什麼？
         </h2>
@@ -153,7 +204,9 @@ export default function NewSchedule() {
             placeholder="例如：期末專題討論"
             required
             maxLength={120}
+            {...invalidProps("title")}
           />
+          {fieldError("title")}
         </label>
         <div className="form-row">
           <label>
@@ -163,7 +216,9 @@ export default function NewSchedule() {
               placeholder="大家怎麼稱呼你？"
               required
               maxLength={40}
+              {...invalidProps("creatorName")}
             />
+            {fieldError("creatorName")}
           </label>
           <label>
             總人數（包含你）
@@ -174,7 +229,9 @@ export default function NewSchedule() {
               max={100}
               defaultValue={4}
               required
+              {...invalidProps("expectedParticipants")}
             />
+            {fieldError("expectedParticipants")}
           </label>
         </div>
         <label>
@@ -193,11 +250,13 @@ export default function NewSchedule() {
         <div className="form-row">
           <label>
             開始日期
-            <input name="startDate" type="date" required />
+            <input name="startDate" type="date" required {...invalidProps("startDate")} />
+            {fieldError("startDate")}
           </label>
           <label>
             結束日期
-            <input name="endDate" type="date" required />
+            <input name="endDate" type="date" required {...invalidProps("endDate")} />
+            {fieldError("endDate")}
           </label>
         </div>
         <p className="field-hint">最多 31 天；每日時間不跨午夜。</p>
@@ -209,7 +268,9 @@ export default function NewSchedule() {
               type="time"
               defaultValue="18:00"
               required
+              {...invalidProps("dailyStartTime")}
             />
+            {fieldError("dailyStartTime")}
           </label>
           <label>
             每日結束
@@ -218,7 +279,9 @@ export default function NewSchedule() {
               type="time"
               defaultValue="22:00"
               required
+              {...invalidProps("dailyEndTime")}
             />
+            {fieldError("dailyEndTime")}
           </label>
         </div>
         <div className="form-row">
@@ -239,7 +302,9 @@ export default function NewSchedule() {
               defaultValue="Asia/Taipei"
               list="timezones"
               required
+              {...invalidProps("timezone")}
             />
+            {fieldError("timezone")}
             <datalist id="timezones">
               {[
                 "Asia/Taipei",

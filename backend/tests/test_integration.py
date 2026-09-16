@@ -1,5 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, time
+from datetime import date, datetime, time, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import delete
@@ -98,3 +98,83 @@ def test_capacity_cross_schedule_voting_and_concurrent_confirmation():
             service.delete_comment(db, public_id, comment_id, admin, owner)
         with pytest.raises(HTTPException):
             service.cancel(db, public_id, foreign_admin)
+
+
+def test_concurrent_last_submissions_create_one_candidate_set():
+    public_id, admin, owner = make_schedule()
+    with SessionLocal() as db:
+        guest = service.join(db, public_id, "Guest", None)
+        schedule = service.get_schedule(db, public_id)
+        slots = [
+            datetime.fromisoformat(entry["startAt"].replace("Z", "+00:00"))
+            for entry in service.slot_grid(service.rules_of(schedule))[0]["slots"]
+        ]
+
+    def submit(token):
+        with SessionLocal() as db:
+            service.save_availability(db, public_id, slots, token)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(submit, [owner, guest]))
+
+    with SessionLocal() as db:
+        final = service.get_schedule(db, public_id)
+        assert final.status.value == "VOTING"
+        assert len(final.candidate_times) == 3
+        assert len({(c.start_at, c.end_at) for c in final.candidate_times}) == 3
+        assert all(p.availability_submitted_at is not None for p in final.participants)
+
+
+def test_vote_and_close_race_stays_consistent():
+    public_id, admin, owner = make_schedule()
+    with SessionLocal() as db:
+        guest = service.join(db, public_id, "Guest", None)
+        schedule = service.get_schedule(db, public_id)
+        slots = [
+            datetime.fromisoformat(entry["startAt"].replace("Z", "+00:00"))
+            for entry in service.slot_grid(service.rules_of(schedule))[0]["slots"]
+        ]
+    with SessionLocal() as db:
+        service.save_availability(db, public_id, slots, owner)
+    with SessionLocal() as db:
+        service.save_availability(db, public_id, slots, guest)
+    with SessionLocal() as db:
+        candidate_id = service.get_schedule(db, public_id).candidate_times[0].id
+
+    def vote():
+        with SessionLocal() as db:
+            try:
+                service.cast_vote(db, public_id, candidate_id, guest)
+                return True
+            except HTTPException:
+                return False
+
+    def close():
+        with SessionLocal() as db:
+            service.close_voting(db, public_id, admin)
+            return True
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        vote_result = pool.submit(vote)
+        close_result = pool.submit(close)
+        assert close_result.result() is True
+        assert vote_result.result() in (True, False)
+
+    with SessionLocal() as db:
+        final = service.get_schedule(db, public_id)
+        assert final.voting_closed_at is not None
+        assert len(final.votes) in (0, 1)
+
+
+def test_deadline_blocks_join_and_availability_changes():
+    public_id, _, owner = make_schedule()
+    with SessionLocal() as db:
+        schedule = service.get_schedule(db, public_id, True)
+        schedule.deadline = datetime.now(timezone.utc) - timedelta(minutes=1)
+        db.commit()
+    with SessionLocal() as db:
+        with pytest.raises(HTTPException, match="截止時間"):
+            service.join(db, public_id, "Late guest", None)
+    with SessionLocal() as db:
+        with pytest.raises(HTTPException, match="截止時間"):
+            service.save_availability(db, public_id, [], owner)

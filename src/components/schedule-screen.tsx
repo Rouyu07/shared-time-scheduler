@@ -6,6 +6,14 @@ import type { ScheduleView } from "@/lib/service";
 import { formatRange } from "@/lib/scheduling";
 import { googleCalendar } from "@/lib/calendar";
 
+type PendingMeeting = {
+  startAt: string;
+  location: string;
+  meetingUrl: string;
+  description: string;
+  reminderMinutes: number | null;
+};
+
 export default function ScheduleScreen({
   id,
   section,
@@ -23,9 +31,15 @@ export default function ScheduleScreen({
   const [joinName, setJoinName] = useState(""),
     [comment, setComment] = useState(""),
     [copyText, setCopyText] = useState("");
+  const [voteChoice, setVoteChoice] = useState<string | null>(null);
+  const [notificationRead, setNotificationRead] = useState(true);
   const [confirmCancel, setConfirmCancel] = useState(false),
     [confirmEmptyAvailability, setConfirmEmptyAvailability] = useState(false),
     [showConfirmedNotice, setShowConfirmedNotice] = useState(false);
+  const [commentToDelete, setCommentToDelete] = useState<
+      ScheduleView["comments"][number] | null
+    >(null),
+    [pendingMeeting, setPendingMeeting] = useState<PendingMeeting | null>(null);
   const drag = useRef<{ value: boolean; active: boolean }>({
     value: false,
     active: false,
@@ -44,6 +58,7 @@ export default function ScheduleScreen({
       }
       previousStatus.current = next.status;
       setS(next);
+      setVoteChoice((current) => current ?? next.myVote ?? null);
       if (reset || !dirtyRef.current) {
         setSelected(new Set(next.me?.slots.map(Date.parse) ?? []));
         setDirty(false);
@@ -88,6 +103,25 @@ export default function ScheduleScreen({
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
+  useEffect(() => {
+    if (!s) return;
+    const eventId =
+      s.status === "CONFIRMED" && s.meeting
+        ? `confirmed:${s.meeting.confirmedAt}`
+        : s.status === "VOTING" && !s.votingClosedAt
+          ? "voting"
+          : null;
+    if (!eventId) {
+      setNotificationRead(true);
+      return;
+    }
+    const key = `heshi:notification:${id}:${eventId}`;
+    const isResultPage =
+      (s.status === "CONFIRMED" && section === "confirmed") ||
+      (s.status === "VOTING" && section === "vote");
+    if (isResultPage) sessionStorage.setItem(key, "read");
+    setNotificationRead(isResultPage || sessionStorage.getItem(key) === "read");
+  }, [id, s, section]);
   async function run(
     action: string,
     method = "POST",
@@ -136,6 +170,15 @@ export default function ScheduleScreen({
     ...(s.isAdmin || section === "manage" ? [["manage", "管理排程"]] : []),
   ];
   const range = (a: string, b: string) => formatRange(a, b, s.timezone);
+  const formatStamp = (value: string) =>
+    new Intl.DateTimeFormat("zh-TW", {
+      timeZone: s.timezone,
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(new Date(value));
   const statusLabel = closed
     ? "已取消"
     : confirmed
@@ -156,6 +199,87 @@ export default function ScheduleScreen({
     });
     setDirty(true);
     dirtyRef.current = true;
+  };
+  const setDaySlots = (value: boolean, targetDay = day) => {
+    const stamps = s.grid[targetDay].slots.map((slot) => Date.parse(slot.startAt));
+    setSelected((old) => {
+      const next = new Set(old);
+      stamps.forEach((stamp) => (value ? next.add(stamp) : next.delete(stamp)));
+      return next;
+    });
+    setDirty(true);
+    dirtyRef.current = true;
+  };
+  const slotButton = (
+    slot: ScheduleView["grid"][number]["slots"][number],
+    dayIndex: number,
+    slotIndex: number,
+  ) => {
+    const stamp = Date.parse(slot.startAt),
+      checked = selected.has(stamp),
+      endLabel = new Intl.DateTimeFormat("zh-TW", {
+        timeZone: s.timezone,
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).format(new Date(stamp + 30 * 60 * 1000)),
+      accessibleLabel = `${s.grid[dayIndex].day} ${slot.label} 至 ${endLabel}，${
+        checked ? "可行，按下取消" : "不可行，按下選擇"
+      }`;
+    return (
+      <button
+        type="button"
+        key={slot.startAt}
+        data-slot={stamp}
+        data-day-index={dayIndex}
+        data-slot-index={slotIndex}
+        aria-pressed={checked}
+        aria-label={accessibleLabel}
+        title={`${slot.label}–${endLabel}`}
+        disabled={!canEdit || busy}
+        className={`time-slot ${checked ? "selected" : ""}`}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          e.currentTarget.focus();
+          drag.current = { active: true, value: !checked };
+          setSlot(stamp, !checked);
+        }}
+        onClick={(e) => {
+          if (e.detail === 0) setSlot(stamp, !checked);
+        }}
+        onKeyDown={(e) => {
+          if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key))
+            return;
+          e.preventDefault();
+          const vertical = e.key === "ArrowUp" || e.key === "ArrowDown";
+          const nextDay = vertical
+            ? dayIndex
+            : Math.max(
+                0,
+                Math.min(s.grid.length - 1, dayIndex + (e.key === "ArrowLeft" ? -1 : 1)),
+              );
+          const nextSlot = vertical
+            ? Math.max(
+                0,
+                Math.min(
+                  s.grid[nextDay].slots.length - 1,
+                  slotIndex + (e.key === "ArrowUp" ? -1 : 1),
+                ),
+              )
+            : Math.min(slotIndex, s.grid[nextDay].slots.length - 1);
+          e.currentTarget
+            .closest(".availability-picker")
+            ?.querySelector<HTMLButtonElement>(
+              `[data-day-index="${nextDay}"][data-slot-index="${nextSlot}"]:not(:disabled)`,
+            )
+            ?.focus();
+        }}
+      >
+        {slot.label}
+        <span>{checked ? "✓ 可參加" : "選擇"}</span>
+      </button>
+    );
   };
   const resultCard = (r: ScheduleView["results"][number], i: number) => (
     <article
@@ -232,6 +356,12 @@ export default function ScheduleScreen({
         </p>
       </section>
     ) : null;
+  const pendingBest = pendingMeeting
+    ? s.best.find(
+        (candidate) =>
+          Date.parse(candidate.startAt) === Date.parse(pendingMeeting.startAt),
+      )
+    : null;
   return (
     <main className="workspace">
       {confirmEmptyAvailability && (
@@ -297,6 +427,99 @@ export default function ScheduleScreen({
               >
                 查看正式會議 →
               </Link>
+            </div>
+          </section>
+        </div>
+      )}
+      {commentToDelete && (
+        <div className="dialog-backdrop" role="presentation">
+          <section
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-comment-title"
+          >
+            <p className="eyebrow">刪除留言</p>
+            <h2 id="delete-comment-title">確定刪除這則留言？</h2>
+            <p>
+              {commentToDelete.name}：{commentToDelete.content}
+            </p>
+            <div className="actions">
+              <button
+                autoFocus
+                className="secondary"
+                onClick={() => setCommentToDelete(null)}
+              >
+                保留留言
+              </button>
+              <button
+                className="danger"
+                disabled={busy}
+                onClick={async () => {
+                  const target = commentToDelete;
+                  if (
+                    await run(
+                      `comments/${target.id}`,
+                      "DELETE",
+                      undefined,
+                      "留言已刪除",
+                    )
+                  ) {
+                    setCommentToDelete(null);
+                  }
+                }}
+              >
+                確定刪除
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {pendingMeeting && pendingBest && (
+        <div className="dialog-backdrop" role="presentation">
+          <section
+            className="confirm-dialog meeting-confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-meeting-title"
+          >
+            <p className="eyebrow">最終確認</p>
+            <h2 id="confirm-meeting-title">成立這場正式會議？</h2>
+            <p className="meeting-confirm-time">
+              {range(pendingBest.startAt, pendingBest.endAt)}
+            </p>
+            <p>
+              {s.timezone} · {pendingBest.count}/{pendingBest.total} 人可完整參加
+            </p>
+            {pendingMeeting.location && <p>地點：{pendingMeeting.location}</p>}
+            <p className="field-hint">
+              確認後時間不可修改，所有可行時間、推薦與投票都會保持唯讀。
+            </p>
+            <div className="actions">
+              <button
+                autoFocus
+                className="secondary"
+                onClick={() => setPendingMeeting(null)}
+              >
+                返回檢查
+              </button>
+              <button
+                disabled={busy}
+                onClick={async () => {
+                  if (
+                    await run(
+                      "confirm",
+                      "POST",
+                      pendingMeeting,
+                      "會議已確認！請查看正式會議頁",
+                    )
+                  ) {
+                    setPendingMeeting(null);
+                  }
+                }}
+              >
+                確認成立會議 ✓
+              </button>
             </div>
           </section>
         </div>
@@ -432,7 +655,7 @@ export default function ScheduleScreen({
         >
           <span className="nav-icon" aria-hidden="true">⌂</span>
           排程
-          {(s.status === "VOTING" || confirmed) && (
+          {(s.status === "VOTING" || confirmed) && !notificationRead && (
             <i className="notification-dot" aria-label="有新的排程狀態" />
           )}
         </Link>
@@ -600,6 +823,7 @@ export default function ScheduleScreen({
               <article key={c.id}>
                 <div>
                   <b>{c.name}</b>
+                  <span className="role-badge">{c.role}</span>
                   <time>
                     {new Intl.DateTimeFormat("zh-TW", {
                       timeZone: s.timezone,
@@ -613,14 +837,7 @@ export default function ScheduleScreen({
                     <button
                       className="text-button"
                       disabled={busy}
-                      onClick={() =>
-                        run(
-                          `comments/${c.id}`,
-                          "DELETE",
-                          undefined,
-                          "留言已刪除",
-                        )
-                      }
+                      onClick={() => setCommentToDelete(c)}
                     >
                       刪除
                     </button>
@@ -676,6 +893,7 @@ export default function ScheduleScreen({
           {!canEdit && (
             <p className="notice">可行時間已鎖定，以下顯示你最後提交的內容。</p>
           )}
+          <div className="availability-picker availability-mobile">
           <div className="day-navigation">
             <button
               className="secondary compact"
@@ -707,11 +925,14 @@ export default function ScheduleScreen({
             <button
               className="text-button"
               disabled={!canEdit || busy}
-              onClick={() =>
-                s.grid[day].slots.forEach((slot) =>
-                  setSlot(Date.parse(slot.startAt), false),
-                )
-              }
+              onClick={() => setDaySlots(true)}
+            >
+              全選此日
+            </button>
+            <button
+              className="text-button"
+              disabled={!canEdit || busy}
+              onClick={() => setDaySlots(false)}
             >
               清除此日
             </button>
@@ -730,39 +951,64 @@ export default function ScheduleScreen({
               drag.current.active = false;
             }}
           >
-            {s.grid[day].slots.map((slot) => {
-              const stamp = Date.parse(slot.startAt),
-                checked = selected.has(stamp);
-              return (
-                <button
-                  type="button"
-                  key={slot.startAt}
-                  data-slot={stamp}
-                  aria-pressed={checked}
-                  disabled={!canEdit || busy}
-                  className={`time-slot ${checked ? "selected" : ""}`}
-                  onPointerDown={(e) => {
-                    if (e.button !== 0) return;
-                    e.preventDefault();
-                    e.currentTarget.focus();
-                    drag.current = { active: true, value: !checked };
-                    setSlot(stamp, !checked);
-                  }}
-                  onClick={(e) => {
-                    if (e.detail === 0) setSlot(stamp, !checked);
-                  }}
-                >
-                  {slot.label}
-                  <span>{checked ? "✓ 可參加" : "選擇"}</span>
-                </button>
-              );
-            })}
+            {s.grid[day].slots.map((slot, slotIndex) =>
+              slotButton(slot, day, slotIndex),
+            )}
           </div>
           {!s.grid[day].slots.length && (
             <p className="notice">
               此日沒有有效時間格，可能位於日光節約時間切換範圍。
             </p>
           )}
+          </div>
+          <div
+            className="availability-picker availability-desktop"
+            onPointerMove={(e) => {
+              if (!drag.current.active || !canEdit || busy) return;
+              const el = document
+                .elementFromPoint(e.clientX, e.clientY)
+                ?.closest<HTMLElement>("[data-slot]");
+              if (el?.dataset.slot)
+                setSlot(Number(el.dataset.slot), drag.current.value);
+            }}
+            onPointerCancel={() => {
+              drag.current.active = false;
+            }}
+          >
+            <div className="availability-matrix" aria-label="所有日期可行時間矩陣">
+              {s.grid.map((group, dayIndex) => (
+                <section className="availability-day-column" key={group.day}>
+                  <header>
+                    <time dateTime={group.day}>{group.day}</time>
+                    <div>
+                      <button
+                        type="button"
+                        className="text-button"
+                        disabled={!canEdit || busy}
+                        onClick={() => setDaySlots(true, dayIndex)}
+                      >
+                        全選
+                      </button>
+                      <button
+                        type="button"
+                        className="text-button"
+                        disabled={!canEdit || busy}
+                        onClick={() => setDaySlots(false, dayIndex)}
+                      >
+                        清除
+                      </button>
+                    </div>
+                  </header>
+                  <div className="availability-day-slots">
+                    {group.slots.map((slot, slotIndex) =>
+                      slotButton(slot, dayIndex, slotIndex),
+                    )}
+                    {!group.slots.length && <p className="muted">無有效時間格</p>}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </div>
           <div className="save-bar">
             <div>
               <b>
@@ -773,6 +1019,9 @@ export default function ScheduleScreen({
                     : "尚未提交"}
               </b>
               <p>即使沒有可行時間，也請提交空白結果。</p>
+              {s.me.submittedAt && !dirty && (
+                <p className="last-updated">最後提交：{formatStamp(s.me.submittedAt)}</p>
+              )}
             </div>
             <button
               disabled={!canEdit || busy}
@@ -832,7 +1081,9 @@ export default function ScheduleScreen({
                   {p.id === s.me?.id && <small>（你）</small>}
                 </span>
                 <span className={p.submitted ? "submitted" : "muted"}>
-                  {p.submitted ? "✓ 已提交" : "待填寫"}
+                  {p.submitted
+                    ? `✓ 已提交${p.submittedAt ? ` · ${formatStamp(p.submittedAt)}` : ""}`
+                    : "待填寫"}
                 </span>
               </li>
             ))}
@@ -887,14 +1138,14 @@ export default function ScheduleScreen({
           <div className="voting-list">
             {s.candidates.map((c, i) => (
               <article
-                className={`vote-card ${s.myVote === c.id ? "chosen" : ""}`}
+                className={`vote-card ${voteChoice === c.id ? "chosen" : ""}`}
                 key={c.id}
               >
                 <span className="rank">{String(i + 1).padStart(2, "0")}</span>
                 <div className="result-main">
                   <h3>{range(c.startAt, c.endAt)}</h3>
                   <p>
-                    {c.votes} 票{s.myVote === c.id ? " · 你的選擇" : ""}
+                    {c.votes} 票{voteChoice === c.id ? " · 你的選擇" : ""}
                   </p>
                   <div className="progress">
                     <i
@@ -905,15 +1156,13 @@ export default function ScheduleScreen({
                   </div>
                 </div>
                 <button
-                  className={s.myVote === c.id ? "primary" : "secondary"}
+                  className={voteChoice === c.id ? "primary" : "secondary"}
                   disabled={
                     busy || !s.me || s.status !== "VOTING" || !!s.votingClosedAt
                   }
-                  onClick={() =>
-                    run("vote", "POST", { candidateId: c.id }, "投票已更新")
-                  }
+                  onClick={() => setVoteChoice(c.id)}
                 >
-                  {s.myVote === c.id ? "✓ 已選擇" : "投這個時段"}
+                  {voteChoice === c.id ? "✓ 已選擇" : "選這個時段"}
                 </button>
               </article>
             ))}
@@ -925,6 +1174,26 @@ export default function ScheduleScreen({
           )}
           {s.votingClosedAt && (
             <p className="notice">投票已結束，票數已保留，等待建立者確認。</p>
+          )}
+          {!s.votingClosedAt && s.status === "VOTING" && s.me && (
+            <div className="vote-submit-bar">
+              <span>
+                {voteChoice
+                  ? s.myVote
+                    ? "可修改選擇後更新投票"
+                    : "已選擇一個偏好時段"
+                  : "請先選擇一個偏好時段"}
+              </span>
+              <button
+                disabled={busy || !voteChoice || voteChoice === s.myVote}
+                onClick={() =>
+                  voteChoice &&
+                  run("vote", "POST", { candidateId: voteChoice }, "投票已更新")
+                }
+              >
+                {busy ? "送出中…" : s.myVote ? "更新投票" : "送出投票"}
+              </button>
+            </div>
           )}
         </section>
       )}
@@ -982,23 +1251,21 @@ export default function ScheduleScreen({
                   (s.status !== "VOTING" || s.votingClosedAt) && (
                     <form
                       className="form"
-                      onSubmit={async (e) => {
+                      onSubmit={(e) => {
                         e.preventDefault();
                         const data = Object.fromEntries(
                           new FormData(e.currentTarget),
                         );
-                        await run(
-                          "confirm",
-                          "POST",
-                          {
-                            ...data,
-                            reminderMinutes:
-                              data.reminderMinutes === ""
-                                ? null
-                                : Number(data.reminderMinutes),
-                          },
-                          "會議已確認！請查看正式會議頁",
-                        );
+                        setPendingMeeting({
+                          startAt: String(data.startAt),
+                          location: String(data.location ?? ""),
+                          meetingUrl: String(data.meetingUrl ?? ""),
+                          description: String(data.description ?? ""),
+                          reminderMinutes:
+                            data.reminderMinutes === ""
+                              ? null
+                              : Number(data.reminderMinutes),
+                        });
                       }}
                     >
                       <h3>確認最終會議</h3>
@@ -1052,7 +1319,7 @@ export default function ScheduleScreen({
                       <p className="field-hint">
                         確認後會議時間不可修改。系統不會自動替你決定。
                       </p>
-                      <button disabled={busy}>確認正式會議 ✓</button>
+                      <button disabled={busy}>檢查並確認正式會議 →</button>
                     </form>
                   )}
                 {!s.best.length && !closed && (

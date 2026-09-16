@@ -105,12 +105,14 @@ export function present(s: Full, session: Session) {
           name: p.name,
           slots: p.availabilities.map((a) => a.startAt.toISOString()),
           submitted: !!p.availabilitySubmittedAt,
+          submittedAt: p.availabilitySubmittedAt?.toISOString() ?? null,
         }
       : null,
     participants: s.participants.map((p) => ({
       id: p.id,
       name: p.name,
       submitted: !!p.availabilitySubmittedAt,
+      submittedAt: p.availabilitySubmittedAt?.toISOString() ?? null,
     })),
     grid: slotGrid(rulesOf(s)),
     results,
@@ -128,6 +130,8 @@ export function present(s: Full, session: Session) {
       id: c.id,
       participantId: c.participantId,
       name: s.participants.find((p) => p.id === c.participantId)?.name ?? "",
+      role:
+        c.participantId === s.participants[0]?.id ? "建立者" : "參與者",
       content: c.content,
       createdAt: c.createdAt.toISOString(),
     })),

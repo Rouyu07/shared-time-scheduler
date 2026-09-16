@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException
 from . import models as m
 from .auth import hash_token, matches, new_id, new_token
-from .scheduling import Rules, best_of, recommend, slot_grid, utc_iso, utc_naive, wall_instant
+from .scheduling import Rules, best_of, recommend, slot_grid, utc_aware, utc_iso, utc_naive, wall_instant
 
 
 LOAD = (
@@ -15,7 +15,7 @@ LOAD = (
 )
 
 
-def now(): return datetime.now(timezone.utc).replace(tzinfo=None)
+def now(): return datetime.now(timezone.utc)
 def fail(message, status=400): raise HTTPException(status, message)
 
 
@@ -51,17 +51,18 @@ def present(s, admin_token=None, participant_token=None):
     me = actor(s, participant_token); results = results_of(s); best = best_of(results)
     candidates = sorted(s.candidate_times, key=lambda c: c.start_at)
     comments = sorted(s.comments, key=lambda c: c.created_at)
+    creator_participant_id = min(s.participants, key=lambda p: p.joined_at).id if s.participants else None
     return {
       "publicId": s.public_id, "title": s.title, "creatorName": s.creator_name, "description": s.description,
       "startDate": s.start_date.isoformat(), "endDate": s.end_date.isoformat(), "dailyStartTime": s.daily_start_time.strftime("%H:%M"), "dailyEndTime": s.daily_end_time.strftime("%H:%M"), "durationMinutes": s.duration_minutes, "timezone": s.timezone,
       "expectedParticipants": s.expected_participants, "deadline": utc_iso(s.deadline) if s.deadline else None, "status": s.status.value, "votingClosedAt": utc_iso(s.voting_closed_at) if s.voting_closed_at else None,
       "isAdmin": matches(admin_token, s.admin_token_hash),
-      "me": {"id": me.id, "name": me.name, "slots": [utc_iso(a.start_at) for a in me.availabilities], "submitted": me.availability_submitted_at is not None} if me else None,
-      "participants": [{"id": p.id, "name": p.name, "submitted": p.availability_submitted_at is not None} for p in sorted(s.participants, key=lambda p: p.joined_at)],
+      "me": {"id": me.id, "name": me.name, "slots": [utc_iso(a.start_at) for a in me.availabilities], "submitted": me.availability_submitted_at is not None, "submittedAt": utc_iso(me.availability_submitted_at) if me.availability_submitted_at else None} if me else None,
+      "participants": [{"id": p.id, "name": p.name, "submitted": p.availability_submitted_at is not None, "submittedAt": utc_iso(p.availability_submitted_at) if p.availability_submitted_at else None} for p in sorted(s.participants, key=lambda p: p.joined_at)],
       "grid": slot_grid(rules_of(s)), "results": results, "best": best,
       "candidates": [{"id": c.id, "startAt": utc_iso(c.start_at), "endAt": utc_iso(c.end_at), "votes": sum(v.candidate_time_id == c.id for v in s.votes)} for c in candidates],
       "myVote": next((v.candidate_time_id for v in s.votes if me and v.participant_id == me.id), None), "voted": len(s.votes),
-      "comments": [{"id": c.id, "participantId": c.participant_id, "name": next((p.name for p in s.participants if p.id == c.participant_id), ""), "content": c.content, "createdAt": utc_iso(c.created_at)} for c in comments],
+      "comments": [{"id": c.id, "participantId": c.participant_id, "name": next((p.name for p in s.participants if p.id == c.participant_id), ""), "role": "建立者" if c.participant_id == creator_participant_id else "參與者", "content": c.content, "createdAt": utc_iso(c.created_at)} for c in comments],
       "meeting": {"startAt": utc_iso(s.meeting.start_at), "endAt": utc_iso(s.meeting.end_at), "location": s.meeting.location, "meetingUrl": s.meeting.meeting_url, "description": s.meeting.description, "reminderMinutes": s.meeting.reminder_minutes, "confirmedAt": utc_iso(s.meeting.confirmed_at)} if s.meeting else None,
     }
 
@@ -69,7 +70,7 @@ def present(s, admin_token=None, participant_token=None):
 def create(db, value):
     at = now(); public_id = new_token()[:22]; admin_token = new_token(); participant_token = new_token()
     deadline = wall_instant(value.deadline.date(), value.deadline.time(), value.timezone) if value.deadline else None
-    s = m.Schedule(id=new_id(), public_id=public_id, title=value.title, creator_name=value.creator_name, expected_participants=value.expected_participants, description=value.description, start_date=value.start_date, end_date=value.end_date, daily_start_time=value.daily_start_time, daily_end_time=value.daily_end_time, slot_minutes=30, duration_minutes=value.duration_minutes, timezone=value.timezone, deadline=utc_naive(deadline) if deadline else None, admin_token_hash=hash_token(admin_token), status=m.ScheduleStatus.COLLECTING, created_at=at, updated_at=at)
+    s = m.Schedule(id=new_id(), public_id=public_id, title=value.title, creator_name=value.creator_name, expected_participants=value.expected_participants, description=value.description, start_date=value.start_date, end_date=value.end_date, daily_start_time=value.daily_start_time, daily_end_time=value.daily_end_time, slot_minutes=30, duration_minutes=value.duration_minutes, timezone=value.timezone, deadline=utc_aware(deadline) if deadline else None, admin_token_hash=hash_token(admin_token), status=m.ScheduleStatus.COLLECTING, created_at=at, updated_at=at)
     s.participants.append(m.Participant(id=new_id(), name=value.creator_name, normalized_name=value.creator_name.casefold(), participant_token_hash=hash_token(participant_token), joined_at=at, updated_at=at))
     db.add(s); db.commit()
     return public_id, admin_token, participant_token
@@ -94,11 +95,11 @@ def save_availability(db, public_id, slots, token):
     if not chosen <= legal: fail("可行時間包含範圍外或無效的時間格。")
     db.execute(delete(m.Availability).where(m.Availability.schedule_id == s.id, m.Availability.participant_id == p.id))
     at = now()
-    for value in chosen: db.add(m.Availability(id=new_id(), schedule_id=s.id, participant_id=p.id, start_at=value, created_at=at))
+    for value in chosen: db.add(m.Availability(id=new_id(), schedule_id=s.id, participant_id=p.id, start_at=utc_aware(value), created_at=at))
     p.availability_submitted_at = at; p.updated_at = at; db.flush(); db.expire(s)
     s = get_schedule(db, public_id, True); best = best_of(results_of(s))
     if len(best) > 1:
-        for candidate in best: db.add(m.CandidateTime(id=new_id(), schedule_id=s.id, start_at=utc_naive(datetime.fromisoformat(candidate["startAt"].replace("Z", "+00:00"))), end_at=utc_naive(datetime.fromisoformat(candidate["endAt"].replace("Z", "+00:00"))), created_at=at))
+        for candidate in best: db.add(m.CandidateTime(id=new_id(), schedule_id=s.id, start_at=utc_aware(datetime.fromisoformat(candidate["startAt"].replace("Z", "+00:00"))), end_at=utc_aware(datetime.fromisoformat(candidate["endAt"].replace("Z", "+00:00"))), created_at=at))
         s.status = m.ScheduleStatus.VOTING
     s.updated_at = at; db.commit()
 
@@ -125,10 +126,10 @@ def confirm(db, public_id, value, token):
     best = best_of(results_of(s))
     if not best: fail("需等待全員提交後才能確認會議。", 409)
     if s.status == m.ScheduleStatus.VOTING and not s.voting_closed_at: fail("請先結束投票。", 409)
-    start = utc_naive(value.start_at); chosen = next((b for b in best if utc_naive(datetime.fromisoformat(b["startAt"].replace("Z", "+00:00"))) == start), None)
+    start = utc_aware(value.start_at); chosen = next((b for b in best if utc_aware(datetime.fromisoformat(b["startAt"].replace("Z", "+00:00"))) == start), None)
     if not chosen: fail("請從最佳時段中選擇。")
     if len(best) > 1 and s.status != m.ScheduleStatus.VOTING: fail("並列時段必須先進行投票。", 409)
-    at = now(); db.add(m.Meeting(id=new_id(), schedule_id=s.id, start_at=start, end_at=utc_naive(datetime.fromisoformat(chosen["endAt"].replace("Z", "+00:00"))), location=value.location, meeting_url=str(value.meeting_url) if value.meeting_url else "", description=value.description, reminder_minutes=value.reminder_minutes, confirmed_at=at)); s.status=m.ScheduleStatus.CONFIRMED; s.updated_at=at; db.commit()
+    at = now(); db.add(m.Meeting(id=new_id(), schedule_id=s.id, start_at=start, end_at=utc_aware(datetime.fromisoformat(chosen["endAt"].replace("Z", "+00:00"))), location=value.location, meeting_url=str(value.meeting_url) if value.meeting_url else "", description=value.description, reminder_minutes=value.reminder_minutes, confirmed_at=at)); s.status=m.ScheduleStatus.CONFIRMED; s.updated_at=at; db.commit()
 
 
 def cancel(db, public_id, token):

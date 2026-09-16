@@ -49,10 +49,11 @@ PostgreSQL 使用 `pgdata` named volume。請勿執行 `docker compose down -v`�
 
 ## 資料庫與 Migration
 
-目前 Alembic head 為 `20260916_0001`，建立與既有 Prisma schema 相容的資料表、索引、CHECK constraints、唯一限制及跨排程複合外鍵。Migration 有兩種安全路徑：
+目前 Alembic head 為 `20260916_0002`。`0001` 建立與既有 Prisma schema 相容的資料表、索引、CHECK constraints、唯一限制及跨排程複合外鍵；`0002` 將所有 absolute instant 欄位安全轉為 PostgreSQL `timestamptz`。Migration 路徑如下：
 
 - 空資料庫：由 SQLAlchemy metadata 建立完整 schema。
 - 已有 Prisma schema：驗證必要資料表後登記 Alembic revision，不刪表、不重建資料，也不刪除 Prisma migration。
+- 舊的 `timestamp without time zone`：明確以既有值為 UTC 轉換，保留同一時間點；已是 `timestamptz` 的欄位會略過。
 
 啟動 backend 時會執行：
 
@@ -78,7 +79,7 @@ uv run uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 8. 支援留言與刪除權限、截止、取消後唯讀、Google Calendar 預填、ICS 與 VALARM。
 9. 頁面與 API 設為 noindex／no-store；Cookie 為 HttpOnly、SameSite=Lax，正式環境應啟用 Secure。
 
-Mobile 提供固定底部導覽「排程／填時間／成員／更多」，Sticky 提交區會避開底部導覽。投票及正式會議狀態會顯示提示；頁面輪詢發現會議成立時會顯示通知對話框。
+Desktop 的可行時間採多日期橫向矩陣，每日可全選／清除，時間格支援拖曳及方向鍵移動。Mobile 提供單日切換與固定底部導覽「排程／填時間／成員／更多」，可行時間與投票的 Sticky CTA 都會避開底部導覽。投票及正式會議狀態會顯示通知點；使用者進入相應結果頁後會在該瀏覽器標記已讀。頁面輪詢發現會議成立時會顯示通知對話框。正式會議建立與留言刪除皆有二次確認。建立表單會在欄位旁顯示可修正的錯誤並聚焦第一個錯誤欄位。
 
 ## 測試
 
@@ -97,9 +98,9 @@ docker compose exec -T app npm run test:integration
 docker compose exec -T app npx playwright test
 ```
 
-E2E 使用建立者、參與者 A、參與者 B、其他參與者四個獨立 Browser Context，涵蓋建立、加入、空白提交確認、填寫、全員門檻、並列候選、投票、結束投票、人工確認、成立通知、Google Calendar、ICS、Origin、私人 Token 與設定鎖定。測試只記錄並刪除本次建立的 public ID，不清除既有資料。桌機與 390×844 觸控版截圖輸出至 `test-results/`。
+E2E 使用建立者、參與者 A、參與者 B、其他參與者四個獨立 Browser Context，涵蓋欄位錯誤聚焦、建立、三日期桌面矩陣、方向鍵操作、加入、空白提交確認、填寫、全員門檻、並列候選、投票固定 CTA、結束投票、正式會議二次確認、成立通知與已讀狀態、Google Calendar、ICS、Origin、私人 Token 與設定鎖定。測試只記錄並刪除本次建立的 public ID，不清除既有資料。桌機與 390×844 觸控版截圖輸出至 `test-results/`。
 
-2026-09-16 本機驗證結果：Python 6 項、TypeScript 6 項、Prisma/PostgreSQL 整合 3 項、Playwright E2E 2 項全部通過；`next build --webpack` 通過。Alembic revision 為 `20260916_0001 (head)`，測試完成後 `schedules` 為 0 筆。這是目前本機空資料庫的結果，不代表已在含正式資料的資料庫執行遷移。
+2026-09-16 本機驗證結果：Python 9 項（含 PostgreSQL 最後提交、投票結束競態與截止規則）、TypeScript 6 項、Prisma/PostgreSQL 整合 3 項、Playwright E2E 2 項全部通過；`next build --webpack` 通過。Alembic revision 已實際由 `20260916_0001` 升為 `20260916_0002 (head)`。升版前後業務資料筆數一致：`schedules` 1、`participants` 1，其餘業務表 0；既有資料未刪除或重設。所有 19 個 instant 欄位已核對為 timezone-aware。
 
 正式建置前先停止開發中的 app，避免兩個程序同時寫入 `.next`：
 
