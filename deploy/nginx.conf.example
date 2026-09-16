@@ -1,0 +1,23 @@
+# Example only: configure your real domain and TLS before public use.
+# Put this file in the nginx http context.
+limit_req_zone $binary_remote_addr zone=schedule_api:10m rate=10r/s;
+server {
+    listen 80;
+    server_name schedule.example.com;
+    client_max_body_size 100k;
+    location /api/ {
+        limit_req zone=schedule_api burst=30 nodelay;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_no_cache 1;
+        proxy_cache_bypass 1;
+    }
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

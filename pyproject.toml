@@ -1,0 +1,28 @@
+[project]
+name = "heshi-backend"
+version = "0.1.0"
+description = "合時多人共同時間排程系統 FastAPI backend"
+requires-python = ">=3.12"
+dependencies = [
+  "alembic==1.16.5",
+  "fastapi==0.116.1",
+  "psycopg[binary]==3.2.10",
+  "pydantic==2.11.9",
+  "sqlalchemy==2.0.43",
+  "uvicorn[standard]==0.35.0",
+]
+
+[dependency-groups]
+dev = [
+  "httpx==0.28.1",
+  "pytest==8.4.2",
+  "pytest-cov==6.2.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+addopts = "-q"
+markers = ["integration: requires the configured PostgreSQL database"]
+
+[tool.uv]
+package = false

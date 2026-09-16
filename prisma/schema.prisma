@@ -1,0 +1,149 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ScheduleStatus {
+  COLLECTING
+  VOTING
+  CONFIRMED
+  CANCELLED
+}
+
+model Schedule {
+  id               String         @id @default(cuid())
+  publicId         String         @unique @map("public_id")
+  title            String         @db.VarChar(120)
+  creatorName      String         @map("creator_name") @db.VarChar(40)
+  expectedParticipants Int        @map("expected_participants")
+  votingClosedAt   DateTime?      @map("voting_closed_at") @db.Timestamptz(3)
+  description      String?        @db.Text
+  startDate        DateTime       @map("start_date") @db.Date
+  endDate          DateTime       @map("end_date") @db.Date
+  dailyStartTime   DateTime       @map("daily_start_time") @db.Time(0)
+  dailyEndTime     DateTime       @map("daily_end_time") @db.Time(0)
+  slotMinutes      Int            @default(30) @map("slot_minutes")
+  durationMinutes  Int            @map("duration_minutes")
+  timezone         String         @default("Asia/Taipei") @db.VarChar(64)
+  deadline         DateTime?
+  adminTokenHash   String         @map("admin_token_hash") @db.VarChar(255)
+  status           ScheduleStatus @default(COLLECTING)
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  participants     Participant[]
+  availabilities   Availability[]
+  candidateTimes   CandidateTime[]
+  votes            Vote[]
+  comments         Comment[]
+  meeting          Meeting?
+
+  @@index([status])
+  @@index([deadline])
+  @@map("schedules")
+}
+
+model Participant {
+  id                      String         @id @default(cuid())
+  scheduleId              String         @map("schedule_id")
+  name                    String         @db.VarChar(40)
+  normalizedName          String         @map("normalized_name") @db.VarChar(40)
+  participantTokenHash    String         @map("participant_token_hash") @db.VarChar(255)
+  availabilitySubmittedAt DateTime?       @map("availability_submitted_at")
+  joinedAt                DateTime        @default(now()) @map("joined_at")
+  updatedAt               DateTime        @updatedAt @map("updated_at")
+
+  schedule                Schedule       @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  availabilities          Availability[]
+  votes                   Vote[]
+  comments                Comment[]
+
+  @@unique([scheduleId, normalizedName])
+  @@index([scheduleId])
+  @@map("participants")
+}
+
+model Availability {
+  id            String      @id @default(cuid())
+  scheduleId    String      @map("schedule_id")
+  participantId String      @map("participant_id")
+  startAt       DateTime    @map("start_at")
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  schedule      Schedule    @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  participant   Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@unique([participantId, startAt])
+  @@index([scheduleId, startAt])
+  @@index([participantId])
+  @@map("availabilities")
+}
+
+model CandidateTime {
+  id          String    @id @default(cuid())
+  scheduleId  String    @map("schedule_id")
+  startAt     DateTime  @map("start_at")
+  endAt       DateTime  @map("end_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  schedule    Schedule  @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  votes       Vote[]
+
+  @@unique([scheduleId, startAt, endAt])
+  @@index([scheduleId, startAt])
+  @@map("candidate_times")
+}
+
+model Vote {
+  id              String        @id @default(cuid())
+  scheduleId      String        @map("schedule_id")
+  candidateTimeId String        @map("candidate_time_id")
+  participantId   String        @map("participant_id")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  schedule        Schedule      @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  candidateTime   CandidateTime @relation(fields: [candidateTimeId], references: [id], onDelete: Cascade)
+  participant     Participant   @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduleId, participantId])
+  @@index([candidateTimeId])
+  @@index([participantId])
+  @@map("votes")
+}
+
+model Comment {
+  id            String      @id @default(cuid())
+  scheduleId    String      @map("schedule_id")
+  participantId String      @map("participant_id")
+  content       String      @db.VarChar(500)
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  schedule      Schedule    @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  participant   Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@index([scheduleId, createdAt])
+  @@index([participantId])
+  @@map("comments")
+}
+
+model Meeting {
+  id              String    @id @default(cuid())
+  scheduleId      String    @unique @map("schedule_id")
+  startAt         DateTime  @map("start_at")
+  endAt           DateTime  @map("end_at")
+  location        String?   @db.VarChar(200)
+  meetingUrl      String?   @map("meeting_url") @db.VarChar(2048)
+  description     String?   @db.Text
+  reminderMinutes Int?      @map("reminder_minutes")
+  confirmedAt     DateTime  @default(now()) @map("confirmed_at")
+
+  schedule        Schedule  @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@map("meetings")
+}
