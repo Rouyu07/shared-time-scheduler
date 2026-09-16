@@ -98,9 +98,9 @@ docker compose exec -T app npm run test:integration
 docker compose exec -T app npx playwright test
 ```
 
-E2E 使用建立者、參與者 A、參與者 B、其他參與者四個獨立 Browser Context，涵蓋欄位錯誤聚焦、建立、三日期桌面矩陣、方向鍵操作、加入、空白提交確認、填寫、全員門檻、並列候選、投票固定 CTA、結束投票、正式會議二次確認、成立通知與已讀狀態、Google Calendar、ICS、Origin、私人 Token 與設定鎖定。測試只記錄並刪除本次建立的 public ID，不清除既有資料。桌機與 390×844 觸控版截圖輸出至 `test-results/`。
+E2E 使用隔離 Cookie／Browser Context，主流程以建立者、參與者 A、參與者 B、其他參與者四個身分驗收，並另測單一最佳與截止／取消流程。涵蓋欄位錯誤聚焦、建立、三日期桌面矩陣、方向鍵操作、加入、空白提交確認、填寫、全員門檻、單一最佳不開投票、並列候選、投票固定 CTA、結束投票、正式會議二次確認、截止禁止加入、取消後唯讀、成立通知與已讀狀態、Google Calendar、ICS、Origin、私人 Token 與設定鎖定。測試只記錄並刪除本次建立的 public ID，不清除既有資料。桌機與 390×844 觸控版截圖輸出至 `test-results/`。
 
-2026-09-16 本機驗證結果：Python 9 項（含 PostgreSQL 最後提交、投票結束競態與截止規則）、TypeScript 6 項、Prisma/PostgreSQL 整合 3 項、Playwright E2E 2 項全部通過；`next build --webpack` 通過。Alembic revision 已實際由 `20260916_0001` 升為 `20260916_0002 (head)`。升版前後業務資料筆數一致：`schedules` 1、`participants` 1，其餘業務表 0；既有資料未刪除或重設。所有 19 個 instant 欄位已核對為 timezone-aware。
+2026-09-16 本機驗證結果：Python 9 項（含 PostgreSQL 最後提交、投票結束競態與截止規則）、TypeScript 6 項、Prisma/PostgreSQL 整合 3 項、Playwright E2E 4 項全部通過；`next build --webpack` 通過。Alembic revision 已實際由 `20260916_0001` 升為 `20260916_0002 (head)`。升版前後業務資料筆數一致：`schedules` 1、`participants` 1，其餘業務表 0；既有資料未刪除或重設。所有 19 個 instant 欄位已核對為 timezone-aware。
 
 正式建置前先停止開發中的 app，避免兩個程序同時寫入 `.next`：
 

@@ -307,3 +307,97 @@ test("HTTP origin validation, private tokens and locked settings", async ({
   expect((await request.get("/api/schedules/not-found")).status()).toBe(404);
 });
 
+test("single best skips voting and only the creator can confirm", async ({
+  page,
+  browser,
+}) => {
+  const created = await page.request.post("/api/schedules", {
+    data: {
+      title: "單一最佳驗收",
+      creatorName: "建立者",
+      expectedParticipants: 1,
+      startDate: "2027-09-19",
+      endDate: "2027-09-19",
+      dailyStartTime: "19:00",
+      dailyEndTime: "20:00",
+      durationMinutes: 60,
+      timezone: "Asia/Taipei",
+    },
+    headers: { Origin: "http://localhost:3000" },
+  });
+  expect(created.status()).toBe(201);
+  const data = await created.json();
+  ids.push(data.publicId);
+  const share = `/s/${data.publicId}`;
+  await page.goto(`${share}/availability`);
+  const slots = page.locator(".availability-desktop .time-slot");
+  await slots.nth(0).click();
+  await slots.nth(1).click();
+  await page.getByRole("button", { name: "儲存並提交" }).click();
+  await page.getByRole("link", { name: "共同時間" }).click();
+  await expect(page.locator(".result-card")).toHaveCount(1);
+  await expect(page.getByRole("link", { name: "時段投票" })).toHaveCount(0);
+
+  const anonymousContext = await browser.newContext();
+  const anonymous = await anonymousContext.newPage();
+  await anonymous.goto(share);
+  await expect(
+    anonymous.getByRole("link", { name: "管理排程", exact: true }),
+  ).toHaveCount(0);
+  await anonymousContext.close();
+
+  await page.getByRole("link", { name: "管理排程", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "確認最終會議" })).toBeVisible();
+  await page.getByRole("button", { name: "檢查並確認正式會議" }).click();
+  await page
+    .getByRole("dialog", { name: "成立這場正式會議？" })
+    .getByRole("button", { name: "確認成立會議" })
+    .click();
+  await expect(page.getByRole("status")).toContainText("會議已確認");
+});
+
+test("expired incomplete schedule can be cancelled and stays read-only", async ({
+  page,
+  browser,
+}) => {
+  const created = await page.request.post("/api/schedules", {
+    data: {
+      title: "截止與取消驗收",
+      creatorName: "建立者",
+      expectedParticipants: 2,
+      startDate: "2027-09-20",
+      endDate: "2027-09-20",
+      dailyStartTime: "19:00",
+      dailyEndTime: "21:00",
+      durationMinutes: 60,
+      timezone: "Asia/Taipei",
+      deadline: "2027-09-20T18:00",
+    },
+    headers: { Origin: "http://localhost:3000" },
+  });
+  expect(created.status()).toBe(201);
+  const data = await created.json();
+  ids.push(data.publicId);
+  await db.schedule.update({
+    where: { publicId: data.publicId },
+    data: { deadline: new Date(Date.now() - 60_000) },
+  });
+  const share = `/s/${data.publicId}`;
+  await page.goto(share);
+  await expect(page.getByText("填寫已截止，但尚未全員提交")).toBeVisible();
+
+  const anonymousContext = await browser.newContext();
+  const anonymous = await anonymousContext.newPage();
+  await anonymous.goto(share);
+  await expect(anonymous.getByLabel("加入用顯示名稱")).toHaveCount(0);
+  await anonymousContext.close();
+
+  await page.getByRole("link", { name: "管理排程", exact: true }).click();
+  await page.getByRole("button", { name: "取消此排程" }).click();
+  await page.getByRole("button", { name: "確定取消" }).click();
+  await expect(page.getByRole("status")).toContainText("排程已取消");
+  await page.goto(`${share}/availability`);
+  await expect(page.locator(".availability-desktop .time-slot").first()).toBeDisabled();
+  await expect(page.getByText("此排程已取消，所有資料僅供查看")).toBeVisible();
+});
+
