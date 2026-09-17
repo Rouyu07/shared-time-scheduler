@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import MobileNavigation from "@/components/mobile-navigation";
+import MobileHeader from "@/components/mobile-header";
 import "./globals.css";
 import "./brand.css";
 export const metadata: Metadata = {
@@ -19,6 +20,7 @@ export default function RootLayout({
   return (
     <html lang="zh-Hant">
       <body>
+        <MobileHeader />
         <header className="site-header">
           <Link className="brand" href="/" aria-label="REX 合時首頁">
             <span className="rex-logo">

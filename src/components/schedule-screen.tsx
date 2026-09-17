@@ -165,6 +165,7 @@ export default function ScheduleScreen({
     ["overview", "總覽"],
     ["availability", "我的時間"],
     ["results", "共同時間"],
+    ["discussion", "討論"],
     ...(s.status === "VOTING" ? [["vote", "時段投票"]] : []),
     ...(confirmed ? [["confirmed", "正式會議"]] : []),
     ...(s.isAdmin || section === "manage" ? [["manage", "管理排程"]] : []),
@@ -654,7 +655,7 @@ export default function ScheduleScreen({
           }
         >
           <span className="nav-icon" aria-hidden="true">⌂</span>
-          排程
+          進度
           {(s.status === "VOTING" || confirmed) && !notificationRead && (
             <i className="notification-dot" aria-label="有新的排程狀態" />
           )}
@@ -664,14 +665,14 @@ export default function ScheduleScreen({
           aria-current={section === "availability" ? "page" : undefined}
         >
           <span className="nav-icon" aria-hidden="true">✓</span>
-          填時間
+          時間
         </Link>
         <Link
-          href={`/s/${id}/members`}
-          aria-current={section === "members" ? "page" : undefined}
+          href={`/s/${id}/discussion`}
+          aria-current={section === "discussion" ? "page" : undefined}
         >
-          <span className="nav-icon" aria-hidden="true">♙</span>
-          成員
+          <span className="nav-icon" aria-hidden="true">▢</span>
+          討論
         </Link>
         <Link
           href={`/s/${id}/more`}
@@ -812,7 +813,10 @@ export default function ScheduleScreen({
               )}
             </aside>
           </div>
-          <section className="card comments">
+        </>
+      )}
+      {(section === "overview" || section === "discussion") && (
+          <section className={`card comments ${section === "overview" ? "overview-comments" : "discussion-page"}`}>
             <h2>
               留個訊息 <span className="count">{s.comments.length}</span>
             </h2>
@@ -877,7 +881,6 @@ export default function ScheduleScreen({
               </form>
             )}
           </section>
-        </>
       )}
       {section === "availability" && s.me && (
         <section className="card">
@@ -1040,7 +1043,7 @@ export default function ScheduleScreen({
                 );
               }}
             >
-              {busy ? "提交中…" : "儲存並提交 →"}
+              {busy ? "提交中…" : "儲存我的可行時間 →"}
             </button>
           </div>
         </section>

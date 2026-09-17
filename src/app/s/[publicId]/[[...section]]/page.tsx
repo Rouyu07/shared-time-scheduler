@@ -14,6 +14,7 @@ export default async function Page({
         "results",
         "vote",
         "members",
+        "discussion",
         "more",
         "manage",
         "confirmed",

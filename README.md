@@ -79,7 +79,7 @@ uv run uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 8. 支援留言與刪除權限、截止、取消後唯讀、Google Calendar 預填、ICS 與 VALARM。
 9. 頁面與 API 設為 noindex／no-store；Cookie 為 HttpOnly、SameSite=Lax，正式環境應啟用 Secure。
 
-Desktop 的可行時間採多日期橫向矩陣，每日可全選／清除，時間格支援拖曳及方向鍵移動。Mobile 全站提供固定底部導覽：公開首頁與建立頁使用「首頁／建立／流程／關於」，排程工作區使用「排程／填時間／成員／更多」。導覽支援 iPhone safe-area，可行時間與投票的 Sticky CTA 都會固定在導覽列上方。投票及正式會議狀態會顯示通知點；使用者進入相應結果頁後會在該瀏覽器標記已讀。頁面輪詢發現會議成立時會顯示通知對話框。正式會議建立與留言刪除皆有二次確認。建立表單會在欄位旁顯示可修正的錯誤並聚焦第一個錯誤欄位。
+Desktop 的可行時間採多日期橫向矩陣，每日可全選／清除，時間格支援拖曳及方向鍵移動。Mobile 全站提供固定底部導覽：公開首頁與建立頁使用「首頁／建立／流程／關於」，排程工作區使用「進度／時間／討論／更多」。建立排程在 Mobile 依「基本資訊／日期時間／確認」分為三步，可行時間則以單日清單切換。導覽支援 iPhone safe-area，可行時間與投票的 Sticky CTA 都會固定在導覽列上方。投票及正式會議狀態會顯示通知點；使用者進入相應結果頁後會在該瀏覽器標記已讀。頁面輪詢發現會議成立時會顯示通知對話框。正式會議建立與留言刪除皆有二次確認。建立表單會在欄位旁顯示可修正的錯誤並聚焦第一個錯誤欄位。
 
 ## 測試
 
@@ -98,9 +98,11 @@ docker compose exec -T app npm run test:integration
 docker compose exec -T app npx playwright test
 ```
 
-E2E 使用隔離 Cookie／Browser Context，主流程以建立者、參與者 A、參與者 B、其他參與者四個身分驗收，並另測單一最佳與截止／取消流程。涵蓋欄位錯誤聚焦、建立、三日期桌面矩陣、方向鍵操作、加入、空白提交確認、填寫、全員門檻、單一最佳不開投票、並列候選、投票固定 CTA、結束投票、正式會議二次確認、截止禁止加入、取消後唯讀、成立通知與已讀狀態、Google Calendar、ICS、Origin、私人 Token 與設定鎖定。測試只記錄並刪除本次建立的 public ID，不清除既有資料。桌機與 390×844 觸控版截圖輸出至 `test-results/`。
+E2E 使用隔離 Cookie／Browser Context，主流程以建立者、參與者 A、參與者 B、其他參與者四個身分驗收，並另測單一最佳與截止／取消流程。涵蓋欄位錯誤聚焦、建立、三日期桌面矩陣、方向鍵操作、加入、空白提交確認、填寫、全員門檻、單一最佳不開投票、並列候選、投票固定 CTA、結束投票、正式會議二次確認、截止禁止加入、取消後唯讀、成立通知與已讀狀態、Google Calendar、ICS、Origin、私人 Token 與設定鎖定。測試只記錄並刪除本次建立的 public ID，不清除既有資料。Desktop 使用 1280px 驗收；Mobile 以 390×844 逐頁驗收首頁、建立、加入、填時間、等待、推薦、投票、確認、完成與討論，並以 360px、430px 補做 overflow 與固定導覽邊界檢查。截圖輸出至 `test-results/`。
 
 2026-09-16 本機驗證結果：Python 9 項（含 PostgreSQL 最後提交、投票結束競態與截止規則）、TypeScript 6 項、Prisma/PostgreSQL 整合 3 項、Playwright E2E 4 項全部通過；`next build --webpack` 通過。Alembic revision 已實際由 `20260916_0001` 升為 `20260916_0002 (head)`。升版前後業務資料筆數一致：`schedules` 1、`participants` 1，其餘業務表 0；既有資料未刪除或重設。所有 19 個 instant 欄位已核對為 timezone-aware。
+
+2026-09-17 Mobile UX 重構驗證結果：Python 9 項、TypeScript 6 項、Prisma/PostgreSQL 整合 3 項、Playwright E2E 4 項全部通過；Production Build 通過。Alembic 維持 `20260916_0002 (head)`，本輪未修改後端、schema 或 migration。
 
 正式建置前先停止開發中的 app，避免兩個程序同時寫入 `.next`：
 

@@ -65,7 +65,17 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
     fullPage: false,
     animations: "disabled",
   });
+  for (const width of [360, 430]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expectFixedMobileNavigation(page);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBeTruthy();
+  }
   await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(page.locator(".mobile-header")).toBeHidden();
   await Promise.all([
     page.waitForURL("**/s/new"),
     page.getByRole("link", { name: "建立第一個排程" }).click(),
@@ -81,8 +91,16 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await page.setViewportSize({ width: 390, height: 844 });
   await expectFixedMobileNavigation(
     page,
-    page.getByRole("button", { name: "建立排程，取得分享連結" }),
+    page.getByRole("button", { name: "下一步" }),
   );
+  await expect(page.getByText("基本資訊", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("開始日期")).toBeHidden();
+  await page.getByRole("button", { name: "下一步" }).click();
+  await expect(page.getByLabel("開始日期")).toBeVisible();
+  await page.getByRole("button", { name: "下一步" }).click();
+  await expect(page.getByLabel("填寫截止時間")).toBeVisible();
+  await page.getByRole("button", { name: "返回日期時間" }).click();
+  await page.getByRole("button", { name: "上一步" }).click();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -145,7 +163,7 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
     fullPage: true,
     animations: "disabled",
   });
-  await page.getByRole("button", { name: "儲存並提交" }).click();
+  await page.getByRole("button", { name: "儲存我的可行時間" }).click();
   await expect(page.getByRole("status")).toContainText("已提交");
   await page.getByRole("link", { name: "共同時間", exact: true }).click();
   await expect(
@@ -181,13 +199,13 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await expect(guest.getByRole("status")).toContainText("已加入");
   await expect(guest.getByLabel("目前瀏覽身分")).toContainText("小陳");
   await expect(guest.getByLabel("目前瀏覽身分")).toContainText("參與者");
-  await guest.getByRole("link", { name: "填時間", exact: true }).click();
+  await guest.getByRole("link", { name: "時間", exact: true }).click();
   const guestSlots = guest.locator(".availability-mobile .time-slot");
   await expect(guestSlots).toHaveCount(4);
   await guestSlots.first().focus();
   await guest.keyboard.press("ArrowDown");
   await expect(guestSlots.nth(1)).toBeFocused();
-  await guest.getByRole("button", { name: "儲存並提交" }).click();
+  await guest.getByRole("button", { name: "儲存我的可行時間" }).click();
   await expect(
     guest.getByRole("heading", { name: "提交空白可行時間？" }),
   ).toBeVisible();
@@ -223,7 +241,18 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBeTruthy();
-  await guest.getByRole("button", { name: "儲存並提交" }).click();
+  await guest.getByRole("button", { name: "儲存我的可行時間" }).click();
+  await guest.goto(`${share}/discussion`);
+  await expect(guest.getByRole("heading", { name: "留個訊息" })).toBeVisible();
+  await expectFixedMobileNavigation(
+    guest,
+    guest.getByRole("button", { name: "送出留言" }),
+  );
+  await guest.screenshot({
+    path: "test-results/discussion-mobile.png",
+    fullPage: false,
+    animations: "disabled",
+  });
   await guest.goto(share);
   await expect(
     guest.getByRole("heading", { name: "推薦的好時間" }),
@@ -244,13 +273,13 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
     await participant.goto(share);
     await participant.getByLabel("加入用顯示名稱").fill(name);
     await participant.getByRole("button", { name: "加入排程" }).click();
-    await participant.getByRole("link", { name: "填時間", exact: true }).click();
+    await participant.getByRole("link", { name: "時間", exact: true }).click();
     for (let i = 0; i < 3; i++)
       await participant
         .locator(".availability-mobile .time-slot")
         .nth(i)
         .click();
-    await participant.getByRole("button", { name: "儲存並提交" }).click();
+    await participant.getByRole("button", { name: "儲存我的可行時間" }).click();
     return isolated;
   };
   const participantB = await joinAndSubmit("小林");
@@ -330,9 +359,9 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
     animations: "disabled",
   });
   await guest.reload();
-  await guest.getByRole("link", { name: /^排程/ }).click();
-  await expect(guest.getByText("會議已確認", { exact: false }).first()).toBeVisible();
   await expect(guest.getByLabel("有新的排程狀態")).toBeVisible();
+  await guest.getByRole("link", { name: /^進度/ }).click();
+  await expect(guest.getByText("會議已確認", { exact: false }).first()).toBeVisible();
   await guest.goto(`${share}/confirmed`);
   await expect(
     guest.getByRole("heading", { name: "我們就約在這個時間。" }),
@@ -348,6 +377,15 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
     fullPage: false,
     animations: "disabled",
   });
+  for (const width of [360, 430]) {
+    await guest.setViewportSize({ width, height: 844 });
+    await expectFixedMobileNavigation(guest);
+    expect(
+      await guest.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBeTruthy();
+  }
   await participantB.close();
   await otherParticipant.close();
   await context.close();
@@ -422,7 +460,7 @@ test("single best skips voting and only the creator can confirm", async ({
   const slots = page.locator(".availability-desktop .time-slot");
   await slots.nth(0).click();
   await slots.nth(1).click();
-  await page.getByRole("button", { name: "儲存並提交" }).click();
+  await page.getByRole("button", { name: "儲存我的可行時間" }).click();
   await page.getByRole("link", { name: "共同時間" }).click();
   await expect(page.locator(".result-card")).toHaveCount(1);
   await expect(page.getByRole("link", { name: "時段投票" })).toHaveCount(0);

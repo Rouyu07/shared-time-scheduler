@@ -6,6 +6,7 @@ export default function NewSchedule() {
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [mobileStep, setMobileStep] = useState(1);
   const [created, setCreated] = useState<{
     publicId: string;
     adminLink: string;
@@ -194,6 +195,15 @@ export default function NewSchedule() {
         </div>
       </aside>
       <form onSubmit={submit} className="card form" noValidate>
+        <ol className="mobile-step-progress" aria-label="建立排程進度">
+          {[1, 2, 3].map((step) => (
+            <li className={mobileStep >= step ? "active" : ""} key={step}>
+              <span>{step}</span>
+              <small>{step === 1 ? "基本資訊" : step === 2 ? "日期時間" : "確認"}</small>
+            </li>
+          ))}
+        </ol>
+        <div className="mobile-step-panel" data-active={mobileStep === 1}>
         <h2>
           <span className="section-number">01</span> 這次要一起做什麼？
         </h2>
@@ -243,6 +253,11 @@ export default function NewSchedule() {
             rows={3}
           />
         </label>
+        <div className="mobile-step-actions">
+          <button type="button" onClick={() => setMobileStep(2)}>下一步 →</button>
+        </div>
+        </div>
+        <div className="mobile-step-panel" data-active={mobileStep === 2}>
         <hr />
         <h2>
           <span className="section-number">02</span> 哪些日期與時間可以選？
@@ -320,6 +335,15 @@ export default function NewSchedule() {
             </datalist>
           </label>
         </div>
+        <div className="mobile-step-actions split">
+          <button type="button" className="secondary" onClick={() => setMobileStep(1)}>上一步</button>
+          <button type="button" onClick={() => setMobileStep(3)}>下一步 →</button>
+        </div>
+        </div>
+        <div className="mobile-step-panel" data-active={mobileStep === 3}>
+        <h2>
+          <span className="section-number">03</span> 確認並建立排程
+        </h2>
         <label>
           填寫截止時間 <span className="optional">選填，依上述時區</span>
           <input name="deadline" type="datetime-local" />
@@ -335,6 +359,10 @@ export default function NewSchedule() {
         <button className="primary large" disabled={busy}>
           {busy ? "建立中…" : "建立排程，取得分享連結 ↗"}
         </button>
+        <div className="mobile-step-actions back-only">
+          <button type="button" className="text-button" onClick={() => setMobileStep(2)}>← 返回日期時間</button>
+        </div>
+        </div>
       </form>
     </main>
   );
