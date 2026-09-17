@@ -1339,8 +1339,15 @@ footer {
 }
 
 @media (max-width: 720px) {
-  .workspace {
-    padding-bottom: calc(104px + env(safe-area-inset-bottom));
+  body {
+    padding-bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+
+  main,
+  footer,
+  .save-bar,
+  .vote-submit-bar {
+    scroll-margin-bottom: calc(88px + env(safe-area-inset-bottom));
   }
 
   .workspace > .tabs {
@@ -1360,6 +1367,7 @@ footer {
     background: rgba(255, 255, 255, 0.98);
     box-shadow: 0 -8px 24px rgba(31, 41, 51, 0.08);
     backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
   }
 
   .mobile-bottom-nav a {

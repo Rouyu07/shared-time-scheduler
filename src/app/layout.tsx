@@ -1,11 +1,17 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Link from "next/link";
+import MobileNavigation from "@/components/mobile-navigation";
 import "./globals.css";
 import "./brand.css";
 export const metadata: Metadata = {
   title: "合時｜REX",
   description: "讓每個人的時間，找到交集。免註冊的多人共同時間排程。",
   robots: { index: false, follow: false },
+};
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 export default function RootLayout({
   children,
@@ -32,7 +38,8 @@ export default function RootLayout({
           </nav>
         </header>
         {children}
-        <footer>
+        <MobileNavigation />
+        <footer id="about">
           <div className="footer-brand">
             <span className="rex-logo">
               <img src="/rex-logo.png" alt="REX 開發團隊" />

@@ -63,7 +63,7 @@ export default function Home() {
           </strong>
         </div>
       </section>
-      <section className="steps">
+      <section className="steps" id="how-it-works">
         <article>
           <span>01 / 建立</span>
           <h2>一個連結，邀請大家</h2>
