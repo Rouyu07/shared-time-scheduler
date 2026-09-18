@@ -149,3 +149,24 @@ test("deadline is enforced for joining and submissions", async () => {
     /截止/,
   );
 });
+
+test("all participants voting closes automatically without creating a meeting", async () => {
+  const s = await create();
+  const auth = { admin: s.admin, participant: s.participant };
+  const guestToken = await joinSchedule(s.publicId, { name: "Guest" }, {});
+  const guest = { participant: guestToken };
+  const slots = slotGrid(base)[0].slots.map((slot) => slot.startAt);
+  await saveAvailability(s.publicId, { slots }, auth);
+  await saveAvailability(s.publicId, { slots }, guest);
+  const open = present(await getSchedule(s.publicId), auth);
+  await vote(s.publicId, { candidateId: open.candidates[0].id }, auth);
+  assert.equal((await getSchedule(s.publicId)).votingClosedAt, null);
+  await vote(s.publicId, { candidateId: open.candidates[1].id }, guest);
+  const closed = await getSchedule(s.publicId);
+  assert.ok(closed.votingClosedAt);
+  assert.equal(closed.meeting, null);
+  await assert.rejects(
+    vote(s.publicId, { candidateId: open.candidates[0].id }, guest),
+    /不開放投票/,
+  );
+});

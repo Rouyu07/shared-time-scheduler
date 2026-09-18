@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException
@@ -20,6 +20,54 @@ def fail(message, status=400): raise HTTPException(status, message)
 
 
 def rules_of(s): return Rules(s.start_date, s.end_date, s.daily_start_time, s.daily_end_time, s.duration_minutes, s.timezone)
+
+
+def creator_participant(s):
+    return min(s.participants, key=lambda p: p.joined_at) if s.participants else None
+
+
+def notify(db, s, notification_type, title, message, recipients=None):
+    at = now()
+    for recipient in recipients or s.participants:
+        exists = db.scalar(
+            select(m.Notification.id).where(
+                m.Notification.schedule_id == s.id,
+                m.Notification.participant_id == recipient.id,
+                m.Notification.type == notification_type,
+            )
+        )
+        if not exists:
+            db.add(
+                m.Notification(
+                    id=new_id(),
+                    schedule_id=s.id,
+                    participant_id=recipient.id,
+                    type=notification_type,
+                    title=title,
+                    message=message,
+                    created_at=at,
+                )
+            )
+
+
+def voting_finished_notifications(db, s, automatic):
+    notify(
+        db,
+        s,
+        "VOTING_COMPLETED",
+        "投票已完成" if automatic else "投票已結束",
+        f"「{s.title}」等待建立者確認會議時間。",
+    )
+    owner = creator_participant(s)
+    if owner:
+        notify(
+            db,
+            s,
+            "CONFIRMATION_REQUIRED",
+            "請確認正式時間",
+            f"「{s.title}」投票已完成，請選擇並確認正式時間。",
+            [owner],
+        )
 
 
 def get_schedule(db, public_id: str, lock=False):
@@ -82,7 +130,11 @@ def join(db, public_id, name, participant_token):
     if len(s.participants) >= s.expected_participants: fail("參與人數已額滿。", 409)
     normalized = name.casefold()
     if any(p.normalized_name == normalized for p in s.participants): fail("此名稱已有人使用，請換一個名稱。", 409)
-    token = new_token(); at = now(); db.add(m.Participant(id=new_id(), schedule_id=s.id, name=name, normalized_name=normalized, participant_token_hash=hash_token(token), joined_at=at, updated_at=at))
+    token = new_token(); at = now()
+    joined = m.Participant(id=new_id(), schedule_id=s.id, name=name, normalized_name=normalized, participant_token_hash=hash_token(token), joined_at=at, updated_at=at)
+    s.participants.append(joined)
+    if len(s.participants) == s.expected_participants:
+        notify(db, s, "HEADCOUNT_REACHED", "排程成員已到齊", f"「{s.title}」的參與成員已全數加入。")
     try: db.commit()
     except IntegrityError: db.rollback(); fail("此名稱已有人使用或參與人數已額滿。", 409)
     return token
@@ -98,9 +150,17 @@ def save_availability(db, public_id, slots, token):
     for value in chosen: db.add(m.Availability(id=new_id(), schedule_id=s.id, participant_id=p.id, start_at=utc_aware(value), created_at=at))
     p.availability_submitted_at = at; p.updated_at = at; db.flush(); db.expire(s)
     s = get_schedule(db, public_id, True); best = best_of(results_of(s))
+    all_submitted = (
+        len(s.participants) == s.expected_participants
+        and all(p.availability_submitted_at is not None for p in s.participants)
+    )
+    if all_submitted:
+        notify(db, s, "ALL_AVAILABILITY_SUBMITTED", "所有成員已提交時間", f"「{s.title}」已收齊所有人的可行時間。")
+        notify(db, s, "RECOMMENDATION_READY", "推薦結果已產生", f"「{s.title}」的共同時間已整理完成。")
     if len(best) > 1:
         for candidate in best: db.add(m.CandidateTime(id=new_id(), schedule_id=s.id, start_at=utc_aware(datetime.fromisoformat(candidate["startAt"].replace("Z", "+00:00"))), end_at=utc_aware(datetime.fromisoformat(candidate["endAt"].replace("Z", "+00:00"))), created_at=at))
         s.status = m.ScheduleStatus.VOTING
+        notify(db, s, "VOTING_STARTED", "投票已開始", f"「{s.title}」有多個最佳時段，現在可以投票。")
     s.updated_at = at; db.commit()
 
 
@@ -111,13 +171,21 @@ def cast_vote(db, public_id, candidate_id, token):
     existing = next((v for v in s.votes if v.participant_id == p.id), None); at = now()
     if existing: existing.candidate_time_id = candidate_id; existing.updated_at = at
     else: db.add(m.Vote(id=new_id(), schedule_id=s.id, candidate_time_id=candidate_id, participant_id=p.id, created_at=at, updated_at=at))
+    db.flush()
+    vote_count = db.scalar(select(func.count(m.Vote.id)).where(m.Vote.schedule_id == s.id)) or 0
+    if vote_count == len(s.participants):
+        s.voting_closed_at = at
+        s.updated_at = at
+        voting_finished_notifications(db, s, True)
     db.commit()
 
 
 def close_voting(db, public_id, token):
     s = get_schedule(db, public_id, True); admin(s, token)
     if s.status != m.ScheduleStatus.VOTING or s.voting_closed_at: fail("投票尚未開啟或已結束。", 409)
-    s.voting_closed_at = now(); s.updated_at = now(); db.commit()
+    s.voting_closed_at = now(); s.updated_at = now()
+    voting_finished_notifications(db, s, False)
+    db.commit()
 
 
 def confirm(db, public_id, value, token):
@@ -129,13 +197,70 @@ def confirm(db, public_id, value, token):
     start = utc_aware(value.start_at); chosen = next((b for b in best if utc_aware(datetime.fromisoformat(b["startAt"].replace("Z", "+00:00"))) == start), None)
     if not chosen: fail("請從最佳時段中選擇。")
     if len(best) > 1 and s.status != m.ScheduleStatus.VOTING: fail("並列時段必須先進行投票。", 409)
-    at = now(); db.add(m.Meeting(id=new_id(), schedule_id=s.id, start_at=start, end_at=utc_aware(datetime.fromisoformat(chosen["endAt"].replace("Z", "+00:00"))), location=value.location, meeting_url=str(value.meeting_url) if value.meeting_url else "", description=value.description, reminder_minutes=value.reminder_minutes, confirmed_at=at)); s.status=m.ScheduleStatus.CONFIRMED; s.updated_at=at; db.commit()
+    at = now(); db.add(m.Meeting(id=new_id(), schedule_id=s.id, start_at=start, end_at=utc_aware(datetime.fromisoformat(chosen["endAt"].replace("Z", "+00:00"))), location=value.location, meeting_url=str(value.meeting_url) if value.meeting_url else "", description=value.description, reminder_minutes=value.reminder_minutes, confirmed_at=at)); s.status=m.ScheduleStatus.CONFIRMED; s.updated_at=at
+    notify(db, s, "MEETING_CONFIRMED", "會議已成立", f"「{s.title}」的正式會議時間已確認。")
+    db.commit()
 
 
 def cancel(db, public_id, token):
     s=get_schedule(db, public_id, True); admin(s, token)
     if s.status == m.ScheduleStatus.CANCELLED: fail("排程已取消。", 409)
-    s.status=m.ScheduleStatus.CANCELLED; s.updated_at=now(); db.commit()
+    s.status=m.ScheduleStatus.CANCELLED; s.updated_at=now()
+    notify(db, s, "SCHEDULE_CANCELLED", "排程已取消", f"「{s.title}」已由建立者取消。")
+    db.commit()
+
+
+def list_notifications(db, public_id, token):
+    s = get_schedule(db, public_id)
+    p = participant(s, token)
+    rows = db.scalars(
+        select(m.Notification)
+        .where(m.Notification.schedule_id == s.id, m.Notification.participant_id == p.id)
+        .order_by(m.Notification.created_at.desc())
+    ).all()
+    return [
+        {
+            "id": item.id,
+            "type": item.type,
+            "title": item.title,
+            "message": item.message,
+            "createdAt": utc_iso(item.created_at),
+            "readAt": utc_iso(item.read_at) if item.read_at else None,
+        }
+        for item in rows
+    ]
+
+
+def mark_notification_read(db, public_id, notification_id, token):
+    s = get_schedule(db, public_id, True)
+    p = participant(s, token)
+    item = db.scalar(
+        select(m.Notification).where(
+            m.Notification.id == notification_id,
+            m.Notification.schedule_id == s.id,
+            m.Notification.participant_id == p.id,
+        )
+    )
+    if not item:
+        fail("通知不存在。", 404)
+    if not item.read_at:
+        item.read_at = now()
+        db.commit()
+
+
+def mark_all_notifications_read(db, public_id, token):
+    s = get_schedule(db, public_id, True)
+    p = participant(s, token)
+    db.execute(
+        update(m.Notification)
+        .where(
+            m.Notification.schedule_id == s.id,
+            m.Notification.participant_id == p.id,
+            m.Notification.read_at.is_(None),
+        )
+        .values(read_at=now())
+    )
+    db.commit()
 
 
 def add_comment(db, public_id, content, token):

@@ -100,6 +100,26 @@ def vote(public_id: str, value: VoteInput, request: Request, db: Session = Depen
     _, token=tokens(request, public_id); service.cast_vote(db, public_id, value.candidate_id, token); return {"ok": True}
 
 
+@app.get("/api/schedules/{public_id}/notifications")
+def notifications(public_id: str, request: Request, db: Session = Depends(db_session)):
+    _, token = tokens(request, public_id)
+    return {"notifications": service.list_notifications(db, public_id, token)}
+
+
+@app.post("/api/schedules/{public_id}/notifications/read-all")
+def read_all_notifications(public_id: str, request: Request, db: Session = Depends(db_session)):
+    _, token = tokens(request, public_id)
+    service.mark_all_notifications_read(db, public_id, token)
+    return {"ok": True}
+
+
+@app.post("/api/schedules/{public_id}/notifications/{notification_id}/read")
+def read_notification(public_id: str, notification_id: str, request: Request, db: Session = Depends(db_session)):
+    _, token = tokens(request, public_id)
+    service.mark_notification_read(db, public_id, notification_id, token)
+    return {"ok": True}
+
+
 @app.post("/api/schedules/{public_id}/close-voting")
 def close(public_id: str, request: Request, db: Session = Depends(db_session)):
     token, _=tokens(request, public_id); service.close_voting(db, public_id, token); return {"ok": True}

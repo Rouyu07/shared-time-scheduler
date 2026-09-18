@@ -5,6 +5,7 @@ import { api } from "@/lib/client";
 import type { ScheduleView } from "@/lib/service";
 import { formatRange } from "@/lib/scheduling";
 import { googleCalendar } from "@/lib/calendar";
+import Toast, { type ToastMessage } from "@/components/toast";
 
 type PendingMeeting = {
   startAt: string;
@@ -32,7 +33,7 @@ export default function ScheduleScreen({
     [comment, setComment] = useState(""),
     [copyText, setCopyText] = useState("");
   const [voteChoice, setVoteChoice] = useState<string | null>(null);
-  const [notificationRead, setNotificationRead] = useState(true);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false),
     [confirmEmptyAvailability, setConfirmEmptyAvailability] = useState(false),
     [showConfirmedNotice, setShowConfirmedNotice] = useState(false);
@@ -106,25 +107,6 @@ export default function ScheduleScreen({
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "auto" });
   }, [section]);
-  useEffect(() => {
-    if (!s) return;
-    const eventId =
-      s.status === "CONFIRMED" && s.meeting
-        ? `confirmed:${s.meeting.confirmedAt}`
-        : s.status === "VOTING" && !s.votingClosedAt
-          ? "voting"
-          : null;
-    if (!eventId) {
-      setNotificationRead(true);
-      return;
-    }
-    const key = `heshi:notification:${id}:${eventId}`;
-    const isResultPage =
-      (s.status === "CONFIRMED" && section === "confirmed") ||
-      (s.status === "VOTING" && section === "vote");
-    if (isResultPage) sessionStorage.setItem(key, "read");
-    setNotificationRead(isResultPage || sessionStorage.getItem(key) === "read");
-  }, [id, s, section]);
   async function run(
     action: string,
     method = "POST",
@@ -138,9 +120,25 @@ export default function ScheduleScreen({
       await api(`/${id}/${action}`, method, body);
       await load(action === "availability" || action === "join");
       setMessage(success);
+      if (action === "availability") {
+        setToast({
+          id: Date.now(),
+          kind: "success",
+          title: "✓ 已儲存可行時間",
+          detail: "你的時間已更新",
+        });
+      }
+      window.dispatchEvent(new Event("heshi:notifications:refresh"));
       return true;
     } catch (e) {
       setError((e as Error).message);
+      if (action === "availability") {
+        setToast({
+          id: Date.now(),
+          kind: "error",
+          title: "儲存失敗，請稍後再試",
+        });
+      }
       await load().catch(() => {});
       return false;
     } finally {
@@ -387,6 +385,7 @@ export default function ScheduleScreen({
     <main
       className={`workspace section-${section} ${!s.me ? "guest-workspace" : ""}`}
     >
+      <Toast message={toast} onDismiss={() => setToast(null)} />
       {confirmEmptyAvailability && (
         <div className="dialog-backdrop" role="presentation">
           <section
@@ -685,9 +684,6 @@ export default function ScheduleScreen({
         >
           <span className="nav-icon" aria-hidden="true">⌂</span>
           總覽
-          {(s.status === "VOTING" || confirmed) && !notificationRead && (
-            <i className="notification-dot" aria-label="有新的排程狀態" />
-          )}
         </Link>
         <Link
           href={`/s/${id}/availability`}
@@ -1091,6 +1087,7 @@ export default function ScheduleScreen({
               {busy ? "提交中…" : "儲存我的可行時間 →"}
             </button>
           </div>
+          <div className="mobile-action-reserved-space" aria-hidden="true" />
         </section>
       )}
       {section === "results" && (
@@ -1234,7 +1231,18 @@ export default function ScheduleScreen({
             </p>
           )}
           {s.votingClosedAt && (
-            <p className="notice">投票已結束，票數已保留，等待建立者確認。</p>
+            <>
+              <p className="notice">
+                {s.isAdmin
+                  ? "投票已完成，請確認正式時間。"
+                  : "投票已完成，等待建立者確認會議時間。"}
+              </p>
+              {s.isAdmin && (
+                <Link className="button primary" href={`/s/${id}/manage`}>
+                  確認正式時間 →
+                </Link>
+              )}
+            </>
           )}
           {!s.votingClosedAt && s.status === "VOTING" && s.me && (
             <div className="vote-submit-bar">
@@ -1256,6 +1264,7 @@ export default function ScheduleScreen({
               </button>
             </div>
           )}
+          <div className="mobile-action-reserved-space" aria-hidden="true" />
         </section>
       )}
       {section === "confirmed" &&

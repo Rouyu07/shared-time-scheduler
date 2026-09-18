@@ -45,6 +45,7 @@ class Schedule(Base):
     candidate_times: Mapped[list[CandidateTime]] = relationship(back_populates="schedule", cascade="all, delete-orphan", foreign_keys="CandidateTime.schedule_id")
     votes: Mapped[list[Vote]] = relationship(back_populates="schedule", cascade="all, delete-orphan", foreign_keys="Vote.schedule_id")
     comments: Mapped[list[Comment]] = relationship(back_populates="schedule", cascade="all, delete-orphan", foreign_keys="Comment.schedule_id")
+    notifications: Mapped[list[Notification]] = relationship(back_populates="schedule", cascade="all, delete-orphan", foreign_keys="Notification.schedule_id")
     meeting: Mapped[Meeting | None] = relationship(back_populates="schedule", uselist=False, cascade="all, delete-orphan", foreign_keys="Meeting.schedule_id")
 
 
@@ -63,6 +64,7 @@ class Participant(Base):
     availabilities: Mapped[list[Availability]] = relationship(back_populates="participant", cascade="all, delete-orphan", foreign_keys="Availability.participant_id")
     votes: Mapped[list[Vote]] = relationship(back_populates="participant", cascade="all, delete-orphan", foreign_keys="Vote.participant_id")
     comments: Mapped[list[Comment]] = relationship(back_populates="participant", cascade="all, delete-orphan", foreign_keys="Comment.participant_id")
+    notifications: Mapped[list[Notification]] = relationship(back_populates="participant", cascade="all, delete-orphan", foreign_keys="Notification.participant_id")
 
 
 class Availability(Base):
@@ -129,3 +131,34 @@ class Meeting(Base):
     reminder_minutes: Mapped[int | None] = mapped_column(Integer)
     confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     schedule: Mapped[Schedule] = relationship(back_populates="meeting", foreign_keys=[schedule_id])
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["participant_id", "schedule_id"],
+            ["participants.id", "participants.schedule_id"],
+            name="notification_participant_schedule_fk",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "schedule_id",
+            "participant_id",
+            "type",
+            name="notifications_schedule_participant_type_key",
+        ),
+        Index("notifications_participant_created_at_idx", "participant_id", "created_at"),
+        Index("notifications_participant_read_at_idx", "participant_id", "read_at"),
+        Index("notifications_schedule_id_idx", "schedule_id"),
+    )
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    schedule_id: Mapped[str] = mapped_column(ForeignKey("schedules.id", ondelete="CASCADE"))
+    participant_id: Mapped[str] = mapped_column(ForeignKey("participants.id", ondelete="CASCADE"))
+    type: Mapped[str] = mapped_column(String(64))
+    title: Mapped[str] = mapped_column(String(120))
+    message: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    schedule: Mapped[Schedule] = relationship(back_populates="notifications", foreign_keys=[schedule_id])
+    participant: Mapped[Participant] = relationship(back_populates="notifications", foreign_keys=[participant_id])

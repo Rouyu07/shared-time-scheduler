@@ -1348,8 +1348,183 @@ footer {
 .compact-schedule-summary,
 .mobile-join-meta,
 .mobile-waiting-note,
-.mobile-result-group {
+.mobile-result-group,
+.mobile-action-reserved-space {
   display: none;
+}
+
+.notification-bell {
+  position: fixed;
+  top: 15px;
+  right: 168px;
+  z-index: 75;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #25262a;
+  font-size: 23px;
+}
+
+.notification-bell i {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #e8752a;
+}
+
+.notification-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  background: rgb(24 29 27 / 35%);
+}
+
+.notification-panel {
+  position: absolute;
+  top: 68px;
+  right: 28px;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(680px, calc(100dvh - 92px));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--paper);
+  box-shadow: 0 24px 80px rgb(24 29 27 / 24%);
+}
+
+.notification-panel > header {
+  display: flex;
+  min-height: 68px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.notification-panel h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.notification-panel header > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.notification-close {
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #efeee9;
+  color: #33353a;
+  font-size: 25px;
+}
+
+.notification-list {
+  max-height: calc(100dvh - 180px);
+  overflow-y: auto;
+}
+
+.notification-item {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 10px 1fr;
+  gap: 10px;
+  min-height: 88px;
+  padding: 15px 18px;
+  border: 0;
+  border-bottom: 1px solid #e6e3dc;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.notification-item > i {
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.notification-item.unread {
+  background: #fff8f1;
+}
+
+.notification-item.unread > i {
+  background: #e8752a;
+}
+
+.notification-item > span {
+  display: grid;
+  gap: 4px;
+}
+
+.notification-item b {
+  font-size: 15px;
+}
+
+.notification-item small,
+.notification-item time {
+  color: #6f7177;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.notification-item time {
+  font-size: 11px;
+}
+
+.notification-item.read {
+  opacity: 0.68;
+}
+
+.notification-state {
+  margin: 0;
+  padding: 48px 24px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.app-toast {
+  position: fixed;
+  top: 82px;
+  right: 24px;
+  z-index: 120;
+  display: grid;
+  gap: 3px;
+  width: min(360px, calc(100vw - 32px));
+  padding: 14px 17px;
+  border: 1px solid #cfd8c9;
+  border-left: 4px solid #678a62;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 14px 42px rgb(24 29 27 / 18%);
+}
+
+.app-toast.error {
+  border-color: #e5c4c0;
+  border-left-color: #b74a40;
+}
+
+.app-toast span {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 @media (max-width: 720px) {
@@ -1397,6 +1572,39 @@ footer {
     grid-template-columns: 44px 1fr 44px;
     padding: 7px 10px;
     text-align: center;
+  }
+
+  .notification-bell {
+    top: 7px;
+    right: 10px;
+    color: #fff;
+  }
+
+  .notification-bell i {
+    border-color: #111216;
+  }
+
+  .notification-panel {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-height: min(78dvh, 680px);
+    border-width: 1px 0 0;
+    border-radius: 22px 22px 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .notification-list {
+    max-height: calc(78dvh - 72px - env(safe-area-inset-bottom));
+  }
+
+  .app-toast {
+    top: 70px;
+    right: 16px;
+    left: 16px;
+    width: auto;
   }
 
   .mobile-task-header a {
@@ -1919,10 +2127,13 @@ footer {
 
   .section-availability,
   .section-vote {
-    padding-bottom: calc(
-      var(--mobile-action-height) + var(--mobile-nav-height) +
-        env(safe-area-inset-bottom) + 24px
-    );
+    padding-bottom: 24px;
+  }
+
+  .section-availability .mobile-action-reserved-space,
+  .section-vote:has(.vote-submit-bar) .mobile-action-reserved-space {
+    display: block;
+    height: calc(var(--mobile-action-height) + 16px);
   }
 
   .section-vote .vote-submit-bar {

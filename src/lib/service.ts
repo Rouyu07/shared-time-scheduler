@@ -310,6 +310,13 @@ export async function vote(id: string, input: unknown, session: Session) {
       },
       update: { candidateTimeId: candidateId },
     });
+    const voteCount = await tx.vote.count({ where: { scheduleId: s.id } });
+    if (voteCount === s.participants.length) {
+      await tx.schedule.update({
+        where: { id: s.id },
+        data: { votingClosedAt: new Date() },
+      });
+    }
   });
 }
 export async function closeVoting(id: string, session: Session) {

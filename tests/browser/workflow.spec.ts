@@ -73,6 +73,11 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
     page,
     page.getByRole("link", { name: "建立第一個排程" }),
   );
+  const homeBell = page.getByRole("button", { name: "通知中心" });
+  await expect(homeBell).toBeVisible();
+  await homeBell.click();
+  await expect(page.getByRole("dialog", { name: "通知" }).getByText("目前沒有新通知")).toBeVisible();
+  await page.getByRole("button", { name: "關閉通知" }).click();
   await expectMobileWidths(page);
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
@@ -181,7 +186,7 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
     animations: "disabled",
   });
   await page.getByRole("button", { name: "儲存我的可行時間" }).click();
-  await expect(page.getByRole("status")).toContainText("已提交");
+  await expect(page.locator(".notice[role='status']")).toContainText("已提交");
   await page.getByRole("link", { name: "共同時間", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "等待全員提交" }),
@@ -273,6 +278,12 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
     ),
   ).toBeTruthy();
   await guest.getByRole("button", { name: "儲存我的可行時間" }).click();
+  await expect(guest.locator(".app-toast.success")).toContainText("已儲存可行時間");
+  await guest.screenshot({
+    path: "test-results/availability-toast-mobile.png",
+    fullPage: false,
+    animations: "disabled",
+  });
   await guest.goto(`${share}/discussion`);
   await expect(guest.getByRole("heading", { name: "留個訊息" })).toBeVisible();
   await expectFixedMobileNavigation(
@@ -319,13 +330,32 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
         .nth(i)
         .click();
     await participant.getByRole("button", { name: "儲存我的可行時間" }).click();
-    return isolated;
+    return { context: isolated, page: participant };
   };
   const participantB = await joinAndSubmit("小林");
   const otherParticipant = await joinAndSubmit("小吳");
 
   await guest.goto(`${share}/availability`);
   await expect(guestSlots.first()).toBeDisabled();
+  const bell = guest.getByRole("button", { name: /通知中心/ });
+  await expect(bell).toBeVisible();
+  const bellBox = await bell.boundingBox();
+  expect(bellBox).not.toBeNull();
+  expect(bellBox!.width).toBeGreaterThanOrEqual(44);
+  expect(bellBox!.height).toBeGreaterThanOrEqual(44);
+  await expect(guest.locator(".notification-bell i")).toBeVisible();
+  await bell.click();
+  const notificationPanel = guest.getByRole("dialog", { name: "通知" });
+  await expect(notificationPanel.getByText("投票已開始", { exact: true })).toBeVisible();
+  await expectMobileWidths(guest);
+  await guest.screenshot({
+    path: "test-results/notifications-mobile.png",
+    fullPage: false,
+    animations: "disabled",
+  });
+  await notificationPanel.getByRole("button", { name: "全部標為已讀" }).click();
+  await expect(guest.locator(".notification-bell i")).toHaveCount(0);
+  await notificationPanel.getByRole("button", { name: "關閉通知" }).click();
   await guest.goto(`${share}/results`);
   await expect(
     guest.getByRole("heading", { name: "完整共同時間" }),
@@ -341,6 +371,16 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await guest.getByRole("button", { name: "選這個時段" }).first().click();
   await guest.getByRole("button", { name: "送出投票" }).click();
   await expect(guest.getByRole("status")).toContainText("投票已更新");
+  await guest.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const [lastCandidateBox, voteActionBox] = await Promise.all([
+    guest.locator(".vote-card").last().boundingBox(),
+    guest.locator(".vote-submit-bar").boundingBox(),
+  ]);
+  expect(lastCandidateBox).not.toBeNull();
+  expect(voteActionBox).not.toBeNull();
+  expect(lastCandidateBox!.y + lastCandidateBox!.height).toBeLessThanOrEqual(
+    voteActionBox!.y + 1,
+  );
   await expectMobileWidths(guest);
   await guest.evaluate(() => window.scrollTo(0, 0));
   await guest.screenshot({
@@ -348,17 +388,34 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
     fullPage: false,
     animations: "disabled",
   });
-  await page.reload();
-  await page.getByRole("link", { name: "時段投票" }).click();
+  await participantB.page.goto(`${share}/vote`);
+  await participantB.page.getByRole("button", { name: "選這個時段" }).first().click();
+  await participantB.page.getByRole("button", { name: "送出投票" }).click();
+  await expect(participantB.page.getByText("投票已完成，等待建立者確認會議時間。")).toHaveCount(0);
+  await otherParticipant.page.goto(`${share}/vote`);
+  await otherParticipant.page.getByRole("button", { name: "選這個時段" }).last().click();
+  await otherParticipant.page.getByRole("button", { name: "送出投票" }).click();
+  await expect(otherParticipant.page.getByText("投票已完成，等待建立者確認會議時間。")).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${share}/vote`);
   await page.getByRole("button", { name: "選這個時段" }).last().click();
   await page.getByRole("button", { name: "送出投票" }).click();
   await expect(page.getByRole("status")).toContainText("投票已更新");
-  await page.getByRole("link", { name: "管理排程", exact: true }).click();
-  await page.getByRole("button", { name: "結束投票", exact: true }).click();
+  await expect(page.getByText("投票已完成，請確認正式時間。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "更新投票" })).toHaveCount(0);
+  await page.getByRole("button", { name: /通知中心/ }).click();
+  const ownerNotifications = page.getByRole("dialog", { name: "通知" });
+  await expect(ownerNotifications.getByText("請確認正式時間", { exact: true })).toBeVisible();
+  await page.screenshot({
+    path: "test-results/notifications-owner-mobile.png",
+    fullPage: false,
+    animations: "disabled",
+  });
+  await ownerNotifications.getByRole("button", { name: "關閉通知" }).click();
+  await page.getByRole("link", { name: "確認正式時間" }).click();
   await expect(
     page.getByRole("heading", { name: "確認最終會議" }),
   ).toBeVisible();
-  await page.setViewportSize({ width: 390, height: 844 });
   await expectFixedMobileNavigation(page);
   await page.getByLabel("會議地點").fill("圖書館討論室");
   await page.getByLabel("線上會議連結").fill("https://example.com/meeting");
@@ -401,14 +458,17 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
     animations: "disabled",
   });
   await guest.reload();
-  await expect(guest.getByLabel("有新的排程狀態")).toBeVisible();
+  await expect(guest.locator(".notification-bell i")).toBeVisible();
+  await guest.getByRole("button", { name: /通知中心/ }).click();
+  const meetingNotification = guest.getByRole("dialog", { name: "通知" });
+  await expect(meetingNotification.getByText("會議已成立", { exact: true })).toBeVisible();
+  await meetingNotification.getByRole("button", { name: "關閉通知" }).click();
   await guest.getByRole("link", { name: /^總覽/ }).click();
   await expect(guest.getByText("會議已確認", { exact: false }).first()).toBeVisible();
   await guest.goto(`${share}/confirmed`);
   await expect(
     guest.getByRole("heading", { name: "瀏覽器驗收・專題討論" }),
   ).toBeVisible();
-  await expect(guest.getByLabel("有新的排程狀態")).toHaveCount(0);
   expect(
     await guest.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -430,8 +490,8 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
       ),
     ).toBeTruthy();
   }
-  await participantB.close();
-  await otherParticipant.close();
+  await participantB.context.close();
+  await otherParticipant.context.close();
   await context.close();
 });
 test("HTTP origin validation, private tokens and locked settings", async ({

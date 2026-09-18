@@ -2,9 +2,9 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta, timezone
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from backend.database import SessionLocal
-from backend.models import Schedule
+from backend.models import Notification, Schedule
 from backend.schemas import CreateSchedule, MeetingInput
 from backend import service
 
@@ -178,3 +178,107 @@ def test_deadline_blocks_join_and_availability_changes():
     with SessionLocal() as db:
         with pytest.raises(HTTPException, match="截止時間"):
             service.save_availability(db, public_id, [], owner)
+
+
+def prepare_voting(expected=3):
+    public_id, admin, owner = make_schedule(expected)
+    guests = []
+    with SessionLocal() as db:
+        for index in range(expected - 1):
+            guests.append(service.join(db, public_id, f"Voter {index + 1}", None))
+    with SessionLocal() as db:
+        schedule = service.get_schedule(db, public_id)
+        slots = [
+            datetime.fromisoformat(entry["startAt"].replace("Z", "+00:00"))
+            for entry in service.slot_grid(service.rules_of(schedule))[0]["slots"]
+        ]
+    for token in [owner, *guests]:
+        with SessionLocal() as db:
+            service.save_availability(db, public_id, slots, token)
+    with SessionLocal() as db:
+        candidates = service.present(service.get_schedule(db, public_id), admin, owner)["candidates"]
+    return public_id, admin, owner, guests, candidates
+
+
+def test_all_participants_voting_auto_closes_and_requires_creator_confirmation():
+    public_id, admin, owner, guests, candidates = prepare_voting()
+    first = candidates[0]
+    with SessionLocal() as db:
+        service.cast_vote(db, public_id, first["id"], owner)
+    with SessionLocal() as db:
+        assert service.get_schedule(db, public_id).voting_closed_at is None
+        service.cast_vote(db, public_id, first["id"], guests[0])
+    with SessionLocal() as db:
+        assert service.get_schedule(db, public_id).voting_closed_at is None
+        service.cast_vote(db, public_id, first["id"], guests[1])
+    with SessionLocal() as db:
+        closed = service.get_schedule(db, public_id)
+        assert closed.voting_closed_at is not None
+        assert closed.meeting is None
+        with pytest.raises(HTTPException, match="不開放投票"):
+            service.cast_vote(db, public_id, candidates[1]["id"], guests[1])
+        owner_types = {item["type"] for item in service.list_notifications(db, public_id, owner)}
+        guest_types = {item["type"] for item in service.list_notifications(db, public_id, guests[0])}
+        assert {"HEADCOUNT_REACHED", "ALL_AVAILABILITY_SUBMITTED", "RECOMMENDATION_READY", "VOTING_STARTED", "VOTING_COMPLETED", "CONFIRMATION_REQUIRED"} <= owner_types
+        assert "CONFIRMATION_REQUIRED" not in guest_types
+        assert "VOTING_COMPLETED" in guest_types
+    with SessionLocal() as db:
+        service.confirm(db, public_id, MeetingInput(start_at=first["startAt"]), admin)
+    with SessionLocal() as db:
+        assert service.get_schedule(db, public_id).meeting is not None
+        assert "MEETING_CONFIRMED" in {
+            item["type"] for item in service.list_notifications(db, public_id, guests[0])
+        }
+
+
+def test_concurrent_last_votes_close_once_and_notification_access_is_isolated():
+    public_id, _, owner, guests, candidates = prepare_voting()
+    foreign_id, _, foreign_owner = make_schedule(1)
+    with SessionLocal() as db:
+        service.cast_vote(db, public_id, candidates[0]["id"], owner)
+
+    def vote(token, candidate_id):
+        with SessionLocal() as db:
+            service.cast_vote(db, public_id, candidate_id, token)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(vote, guests[0], candidates[0]["id"]),
+            pool.submit(vote, guests[1], candidates[1]["id"]),
+        ]
+        for future in futures:
+            future.result()
+
+    with SessionLocal() as db:
+        final = service.get_schedule(db, public_id)
+        assert final.voting_closed_at is not None
+        assert len(final.votes) == 3
+        completion_notifications = db.scalars(
+            select(Notification).where(
+                Notification.schedule_id == final.id,
+                Notification.type == "VOTING_COMPLETED",
+            )
+        ).all()
+        assert len(completion_notifications) == 3
+        with pytest.raises(HTTPException):
+            service.list_notifications(db, public_id, foreign_owner)
+        with pytest.raises(HTTPException):
+            service.mark_notification_read(
+                db, public_id, completion_notifications[0].id, foreign_owner
+            )
+
+
+def test_notification_read_and_read_all_persist():
+    public_id, _, owner, guests, _ = prepare_voting()
+    with SessionLocal() as db:
+        notifications = service.list_notifications(db, public_id, owner)
+        assert notifications
+        first_id = notifications[0]["id"]
+        service.mark_notification_read(db, public_id, first_id, owner)
+    with SessionLocal() as db:
+        refreshed = service.list_notifications(db, public_id, owner)
+        assert next(item for item in refreshed if item["id"] == first_id)["readAt"]
+        service.mark_all_notifications_read(db, public_id, owner)
+    with SessionLocal() as db:
+        assert all(item["readAt"] for item in service.list_notifications(db, public_id, owner))
+        assert any(not item["readAt"] for item in service.list_notifications(db, public_id, guests[0]))

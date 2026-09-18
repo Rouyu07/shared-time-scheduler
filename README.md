@@ -49,7 +49,7 @@ PostgreSQL 使用 `pgdata` named volume。請勿執行 `docker compose down -v`�
 
 ## 資料庫與 Migration
 
-目前 Alembic head 為 `20260916_0002`。`0001` 建立與既有 Prisma schema 相容的資料表、索引、CHECK constraints、唯一限制及跨排程複合外鍵；`0002` 將所有 absolute instant 欄位安全轉為 PostgreSQL `timestamptz`。Migration 路徑如下：
+目前 Alembic head 為 `20260918_0003`。`0001` 建立與既有 Prisma schema 相容的資料表、索引、CHECK constraints、唯一限制及跨排程複合外鍵；`0002` 將所有 absolute instant 欄位安全轉為 PostgreSQL `timestamptz`；`0003` 以 additive migration 新增參與者範圍的站內通知表、事件去重限制與跨排程複合外鍵。Migration 路徑如下：
 
 - 空資料庫：由 SQLAlchemy metadata 建立完整 schema。
 - 已有 Prisma schema：驗證必要資料表後登記 Alembic revision，不刪表、不重建資料，也不刪除 Prisma migration。
@@ -74,12 +74,13 @@ uv run uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 3. 參與者以獨立 Cookie 加入。額滿、重名、截止、跨排程 Token 及 Origin 均由後端驗證。
 4. 每人以 30 分鐘格點選或拖曳可行時間；空白結果須再次確認後才能提交。
 5. 僅在預設人數全部加入且全部提交後計算完整會議區間。推薦保留所有並列最佳候選。
-6. 多個並列最佳候選啟動單選投票；投票可修改，建立者人工結束投票。
+6. 多個並列最佳候選啟動單選投票；投票可修改。所有目前已加入的參與者完成投票時，最後一票所在 transaction 會自動結束投票；建立者仍可提前人工結束。
 7. 建立者從有效最佳候選中人工確認正式會議。系統不會自動依票數成立會議。
 8. 支援留言與刪除權限、截止、取消後唯讀、Google Calendar 預填、ICS 與 VALARM。
-9. 頁面與 API 設為 noindex／no-store；Cookie 為 HttpOnly、SameSite=Lax，正式環境應啟用 Secure。
+9. 排程人數到齊、全員提交、推薦產生、投票開始／完成、待建立者確認、會議成立與排程取消會建立 PostgreSQL 站內通知；通知依參與者 Cookie 隔離，已讀狀態持久保存。
+10. 頁面與 API 設為 noindex／no-store；Cookie 為 HttpOnly、SameSite=Lax，正式環境應啟用 Secure。
 
-Desktop 的可行時間採多日期橫向矩陣，每日可全選／清除，時間格支援拖曳及方向鍵移動。Mobile 全站提供固定底部導覽：公開首頁與建立頁使用「首頁／建立／排程／更多」，排程工作區使用「總覽／時間／討論／更多」。排程工作頁使用緊湊摘要顯示活動、狀態與進度，詳細日期、時區與設定集中於「更多」。建立排程在 Mobile 依「基本資訊／日期時間／確認」分為三步，可行時間以中文單日日期切換與 chips 操作。導覽支援 iPhone safe-area，可行時間、投票與討論輸入的固定 Action Area 會位於導覽列上方，內容區保留對應捲動空間。投票及正式會議狀態會顯示通知點；使用者進入相應結果頁後會在該瀏覽器標記已讀。頁面輪詢發現會議成立時會顯示通知對話框。正式會議建立與留言刪除皆有二次確認。建立表單會在欄位旁顯示可修正的錯誤並聚焦第一個錯誤欄位。
+Desktop 的可行時間採多日期橫向矩陣，每日可全選／清除，時間格支援拖曳及方向鍵移動。Mobile 全站提供固定底部導覽：公開首頁與建立頁使用「首頁／建立／排程／更多」，排程工作區使用「總覽／時間／討論／更多」。排程工作頁使用緊湊摘要顯示活動、狀態與進度，詳細日期、時區與設定集中於「更多」。建立排程在 Mobile 依「基本資訊／日期時間／確認」分為三步，可行時間以中文單日日期切換與 chips 操作。導覽支援 iPhone safe-area，可行時間、投票與討論輸入的固定 Action Area 會位於導覽列上方，內容區保留等高捲動空間，最後一個時間格與候選皆可完整捲到 Action Area 上方。儲存可行時間後顯示無障礙 Toast。Header 的通知鈴鐺以 30 秒低頻輪詢更新未讀提示，Mobile 使用 bottom sheet、Desktop 使用 panel，並支援單筆及全部已讀。正式會議建立與留言刪除皆有二次確認。建立表單會在欄位旁顯示可修正的錯誤並聚焦第一個錯誤欄位。
 
 ## 測試
 
@@ -105,6 +106,8 @@ E2E 使用隔離 Cookie／Browser Context，主流程以建立者、參與者 A�
 2026-09-17 Mobile UX 重構驗證結果：Python 9 項、TypeScript 6 項、Prisma/PostgreSQL 整合 3 項、Playwright E2E 4 項全部通過；Production Build 通過。Alembic 維持 `20260916_0002 (head)`，本輪未修改後端、schema 或 migration。
 
 2026-09-18 Mobile UX 第二輪精修：排程工作區改用 Compact Schedule Summary，等待、推薦、投票、正式會議與討論頁縮短進入主要任務的距離；Mobile Action Area 與 Bottom Navigation 分層並保留完整內容捲動空間；日期切換改為中文日期與 chips。第二輪截圖使用 `*-mobile-v2.png` 命名，保留第一輪成果。Python 9 項、TypeScript 6 項、Prisma/PostgreSQL 整合 3 項、Playwright E2E 4 項與 Production Build 全部通過。
+
+2026-09-18 投票與站內通知更新：全員完成投票時由最後一票的 PostgreSQL transaction 自動結束投票，但不會自動成立正式會議；建立者可提前結束，且仍須人工確認。新增持久化、身分隔離及可標記已讀的通知中心、可行時間儲存 Toast，以及 Mobile Action Area 的精確保留空間。本機實測 Python 12 項、TypeScript 6 項、Prisma/PostgreSQL 整合 4 項、Playwright E2E 4 項與 Production Build 全部通過。Alembic 已實際升至 `20260918_0003 (head)`；Migration 與測試前後既有業務資料筆數一致：`schedules` 6、`participants` 10、`availabilities` 49、`candidate_times` 8、`votes` 2、`comments` 1、`meetings` 1，未刪除或重設既有資料。
 
 正式建置前先停止開發中的 app，避免兩個程序同時寫入 `.next`：
 
