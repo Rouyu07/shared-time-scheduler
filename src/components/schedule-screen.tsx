@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import DesktopIdentity from "@/components/desktop-identity";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/client";
 import type { ScheduleView } from "@/lib/service";
@@ -551,7 +552,7 @@ export default function ScheduleScreen({
           ← 所有相聚，從這裡開始
         </Link>
         <button
-          className="secondary compact"
+          className="secondary compact workspace-share"
           onClick={async () => {
             try {
               await navigator.clipboard.writeText(`${location.origin}/s/${id}`);
@@ -600,6 +601,7 @@ export default function ScheduleScreen({
           </details>
         </section>
       )}
+      {(s.me || s.isAdmin) && <DesktopIdentity name={s.me?.name ?? s.creatorName} role={s.isAdmin ? "建立者" : "參與者"} />}
       <div className="schedule-heading">
         <div>
           <span className="pill">
@@ -612,6 +614,19 @@ export default function ScheduleScreen({
             {s.durationMinutes} 分鐘 · {s.timezone}
           </p>
         </div>
+        <button
+          className="secondary compact heading-share"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(`${location.origin}/s/${id}`);
+              setMessage("已複製分享連結");
+            } catch {
+              setCopyText(`${location.origin}/s/${id}`);
+            }
+          }}
+        >
+          分享排程 ↗
+        </button>
         <div className="heading-mark">◷</div>
       </div>
       {s.description && <p className="description prewrap">{s.description}</p>}

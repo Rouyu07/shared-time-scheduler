@@ -2,6 +2,51 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { db } from "../../src/lib/db";
 const ids: string[] = [];
 
+async function expectCenteredToast(page: Page, path: string) {
+  const toast = page.locator(".app-toast.success");
+  await expect(toast).toBeVisible();
+  const geometry = await toast.evaluate(el => {
+    const box = el.getBoundingClientRect();
+    return { x: Math.abs(box.x + box.width / 2 - innerWidth / 2), y: Math.abs(box.y + box.height / 2 - innerHeight / 2), padding: parseFloat(getComputedStyle(el).paddingTop), pointer: getComputedStyle(el).pointerEvents };
+  });
+  expect(geometry.x).toBeLessThan(1);
+  expect(geometry.y).toBeLessThan(1);
+  expect(geometry.padding).toBeGreaterThan(14);
+  expect(geometry.pointer).toBe("none");
+  await page.screenshot({ path });
+  await expect(toast).toBeHidden({ timeout: 3200 });
+}
+
+async function exerciseDrawer(page: Page) {
+  for (const width of [360, 390, 430]) {
+    await page.setViewportSize({ width, height: 844 });
+    const bell = page.getByRole("button", { name: /^通知中心/ });
+    await bell.click();
+    const panel = page.getByRole("dialog", { name: "通知" });
+    await expect(panel).toBeVisible();
+    await expect(panel.getByRole("button", { name: "關閉通知" })).toBeFocused();
+    await expect.poll(async () => (await panel.boundingBox())!.x + (await panel.boundingBox())!.width).toBeCloseTo(width, 0);
+    expect((await panel.boundingBox())!.x).toBeGreaterThan(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+    expect(await panel.locator(".notification-list").evaluate(el => getComputedStyle(el).overflowY)).toBe("auto");
+    await page.keyboard.press("Tab");
+    await expect(panel.getByRole("button", { name: "關閉通知" })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+    await expect(bell).toBeFocused();
+    await bell.click();
+    await page.locator(".notification-backdrop").click({ position: { x: 4, y: 300 } });
+    await expect(panel).toBeHidden();
+    await bell.click();
+    await panel.getByRole("button", { name: "關閉通知" }).click();
+    await expect(panel).toBeHidden();
+    await expect(page.locator("body > footer")).toBeHidden();
+    await expect(page.locator(".mobile-bottom-nav")).toBeVisible();
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+}
+
+
 async function expectFixedMobileNavigation(page: Page, primaryCta?: Locator) {
   const nav = page.locator(".mobile-bottom-nav");
   await expect(nav).toBeVisible();
@@ -63,8 +108,15 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /大家的時間/ })).toBeVisible();
   await expect(page.locator(".mobile-bottom-nav")).toBeHidden();
+  await expect(page.locator(".site-header .about-link, .site-header .header-link")).toHaveCount(0);
+  expect(await page.locator(".site-header").evaluate(el => getComputedStyle(el).position)).toBe("fixed");
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  expect((await page.locator(".site-header").boundingBox())!.y).toBe(0);
+  await page.screenshot({ path: "test-results/desktop-header-fixed.png" });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  expect(await page.evaluate(() => document.querySelector("main")!.getBoundingClientRect().top)).toBeGreaterThanOrEqual(100);
   await page.screenshot({
-    path: "test-results/home-desktop.png",
+    path: "test-results/precision-home-desktop.png",
     fullPage: true,
     animations: "disabled",
   });
@@ -75,13 +127,18 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   );
   const homeBell = page.getByRole("button", { name: "通知中心" });
   await expect(homeBell).toBeVisible();
+  await exerciseDrawer(page);
   await homeBell.click();
   await expect(page.getByRole("dialog", { name: "通知" }).getByText("目前沒有新通知")).toBeVisible();
   await page.getByRole("button", { name: "關閉通知" }).click();
+  await expect(page.getByRole("dialog", { name: "通知" })).toBeHidden();
   await expectMobileWidths(page);
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await expect(page.locator("body > footer")).toBeHidden();
+  await page.screenshot({ path: "test-results/mobile-footer-removed.png" });
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
-    path: "test-results/home-mobile-v2.png",
+    path: "test-results/precision-home-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -101,10 +158,11 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
     page.getByRole("link", { name: "建立第一個排程" }).click(),
   ]);
   await expect(page.getByLabel("排程名稱")).toBeVisible();
+  await expect(page.getByText("最多 31 天；每日時間不跨午夜。")).toBeHidden();
   await expect(page.locator(".mobile-bottom-nav")).toBeHidden();
   await expect(page.locator(".rex-logo img").first()).toBeVisible();
   await page.screenshot({
-    path: "test-results/create-desktop.png",
+    path: "test-results/precision-create-desktop.png",
     fullPage: true,
     animations: "disabled",
   });
@@ -129,7 +187,7 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
     ),
   ).toBeTruthy();
   await page.screenshot({
-    path: "test-results/create-mobile-v2.png",
+    path: "test-results/precision-create-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -155,12 +213,26 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   ids.push(id);
   await page.goto(share);
   await expect(page.locator(".mobile-bottom-nav")).toBeHidden();
-  await expect(page.getByLabel("目前瀏覽身分")).toContainText("發起者");
-  await expect(page.getByLabel("目前瀏覽身分")).toContainText("建立者");
-  await page.getByText("為什麼沒有重新輸入名字？").click();
-  await expect(
-    page.getByText("分享連結本身不包含管理權限。", { exact: false }),
-  ).toBeVisible();
+  await expect(page.locator(".overview-members .field-hint").first()).toContainText("包含發起者，共 4 人");
+  const avatar = page.getByRole("button", { name: "目前排程身分" });
+  await avatar.hover();
+  await expect(page.getByRole("tooltip")).toContainText("發起者");
+  await expect(page.getByRole("tooltip")).toContainText("建立者");
+  await page.mouse.move(0, 300);
+  await avatar.focus();
+  await expect(page.getByRole("tooltip")).toBeVisible();
+  expect(await avatar.evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThanOrEqual(44);
+  await expect(page.locator(".identity-banner")).toBeHidden();
+  const shareButton = page.locator(".schedule-heading").getByRole("button", { name: "分享排程 ↗" });
+  await expect(shareButton).toBeVisible();
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await shareButton.click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(share);
+  await page.screenshot({ path: "test-results/desktop-schedule-heading.png" });
+  await page.setViewportSize({ width: 760, height: 800 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await expect(shareButton).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 800 });
   await page.getByLabel("留言內容").fill("期待和大家見面");
   await page.getByRole("button", { name: "送出留言" }).click();
   await expect(page.getByText("建立者", { exact: true }).last()).toBeVisible();
@@ -181,18 +253,19 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   for (let i = 0; i < 3; i++)
     await page.locator(".availability-desktop .time-slot").nth(i).click();
   await page.screenshot({
-    path: "test-results/availability-desktop.png",
+    path: "test-results/precision-availability-desktop.png",
     fullPage: true,
     animations: "disabled",
   });
   await page.getByRole("button", { name: "儲存我的可行時間" }).click();
   await expect(page.locator(".notice[role='status']")).toContainText("已提交");
+  await expectCenteredToast(page, "test-results/desktop-toast-center.png");
   await page.getByRole("link", { name: "共同時間", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "等待全員提交" }),
   ).toBeVisible();
   await page.screenshot({
-    path: "test-results/waiting-desktop.png",
+    path: "test-results/precision-waiting-desktop.png",
     fullPage: true,
     animations: "disabled",
   });
@@ -214,7 +287,7 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await expectMobileWidths(guest);
   await guest.evaluate(() => window.scrollTo(0, 0));
   await guest.screenshot({
-    path: "test-results/join-mobile-v2.png",
+    path: "test-results/precision-join-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -223,6 +296,11 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await expect(guest.getByRole("status")).toContainText("已加入");
   await expect(guest.getByLabel("目前瀏覽身分")).toContainText("小陳");
   await expect(guest.getByLabel("目前瀏覽身分")).toContainText("參與者");
+  await guest.setViewportSize({ width: 1280, height: 800 });
+  await guest.getByRole("button", { name: "目前排程身分" }).focus();
+  await expect(guest.getByRole("tooltip")).toContainText("小陳");
+  await expect(guest.getByRole("tooltip")).toContainText("參與者");
+  await guest.setViewportSize({ width: 390, height: 844 });
   await guest.getByRole("link", { name: "時間", exact: true }).click();
   await expect(guest.getByText(/9\/16.*週四/).first()).toBeVisible();
   await expect(guest.getByText("2027-09-16", { exact: true })).toBeHidden();
@@ -240,7 +318,7 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await expectMobileWidths(guest);
   await guest.evaluate(() => window.scrollTo(0, 0));
   await guest.screenshot({
-    path: "test-results/availability-mobile-v2.png",
+    path: "test-results/precision-availability-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -279,8 +357,9 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   ).toBeTruthy();
   await guest.getByRole("button", { name: "儲存我的可行時間" }).click();
   await expect(guest.locator(".app-toast.success")).toContainText("已儲存可行時間");
+  await expectCenteredToast(guest, "test-results/mobile-toast-center.png");
   await guest.screenshot({
-    path: "test-results/availability-toast-mobile.png",
+    path: "test-results/precision-availability-toast-mobile.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -293,7 +372,7 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await expectMobileWidths(guest);
   await guest.evaluate(() => window.scrollTo(0, 0));
   await guest.screenshot({
-    path: "test-results/discussion-mobile-v2.png",
+    path: "test-results/precision-discussion-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -308,7 +387,7 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await expectMobileWidths(guest);
   await guest.evaluate(() => window.scrollTo(0, 0));
   await guest.screenshot({
-    path: "test-results/waiting-mobile-v2.png",
+    path: "test-results/precision-waiting-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -349,10 +428,20 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await expect(notificationPanel.getByText("投票已開始", { exact: true })).toBeVisible();
   await expectMobileWidths(guest);
   await guest.screenshot({
-    path: "test-results/notifications-mobile.png",
+    path: "test-results/precision-notifications-mobile.png",
     fullPage: false,
     animations: "disabled",
   });
+  await guest.screenshot({ path: "test-results/mobile-notification-drawer.png" });
+  await guest.setViewportSize({ width: 390, height: 400 });
+  const notificationList = notificationPanel.locator(".notification-list");
+  expect(await notificationList.evaluate(el => el.scrollHeight > el.clientHeight)).toBeTruthy();
+  await notificationList.hover();
+  await guest.mouse.wheel(0, 500);
+  await expect.poll(() => notificationList.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+  await guest.setViewportSize({ width: 390, height: 844 });
+  await notificationPanel.locator(".notification-item.unread").first().click();
+  await expect(notificationPanel.locator(".notification-item.read")).not.toHaveCount(0);
   await notificationPanel.getByRole("button", { name: "全部標為已讀" }).click();
   await expect(guest.locator(".notification-bell i")).toHaveCount(0);
   await notificationPanel.getByRole("button", { name: "關閉通知" }).click();
@@ -362,7 +451,7 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   ).toBeVisible();
   await guest.evaluate(() => window.scrollTo(0, 0));
   await guest.screenshot({
-    path: "test-results/results-mobile-v2.png",
+    path: "test-results/precision-results-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -384,7 +473,7 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await expectMobileWidths(guest);
   await guest.evaluate(() => window.scrollTo(0, 0));
   await guest.screenshot({
-    path: "test-results/vote-mobile-v2.png",
+    path: "test-results/precision-vote-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -407,7 +496,7 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   const ownerNotifications = page.getByRole("dialog", { name: "通知" });
   await expect(ownerNotifications.getByText("請確認正式時間", { exact: true })).toBeVisible();
   await page.screenshot({
-    path: "test-results/notifications-owner-mobile.png",
+    path: "test-results/precision-notifications-owner-mobile.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -428,7 +517,7 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await expect(confirmation).toContainText("圖書館討論室");
   await expect(confirmation).toContainText("Asia/Taipei");
   await page.screenshot({
-    path: "test-results/confirmation-mobile-v2.png",
+    path: "test-results/precision-confirmation-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -453,10 +542,17 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   expect(cal.status()).toBe(200);
   expect(await cal.text()).toContain("BEGIN:VALARM");
   await page.screenshot({
-    path: "test-results/confirmed-desktop.png",
+    path: "test-results/precision-confirmed-desktop.png",
     fullPage: true,
     animations: "disabled",
   });
+  await page.getByRole("button", { name: /通知中心/ }).click();
+  const desktopNotifications = page.getByRole("dialog", { name: "通知" });
+  await expect(desktopNotifications.getByText("會議已成立", { exact: true })).toBeVisible();
+  expect((await desktopNotifications.boundingBox())!.width).toBe(420);
+  await desktopNotifications.getByRole("button", { name: "全部標為已讀" }).click();
+  await expect(page.locator(".notification-bell i")).toHaveCount(0);
+  await desktopNotifications.getByRole("button", { name: "關閉通知" }).click();
   await guest.reload();
   await expect(guest.locator(".notification-bell i")).toBeVisible();
   await guest.getByRole("button", { name: /通知中心/ }).click();
@@ -477,7 +573,7 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await expectMobileWidths(guest);
   await guest.evaluate(() => window.scrollTo(0, 0));
   await guest.screenshot({
-    path: "test-results/confirmed-mobile-v2.png",
+    path: "test-results/precision-confirmed-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });

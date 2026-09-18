@@ -32,14 +32,7 @@ export default function RootLayout({
               合時<small>BY REX</small>
             </span>
           </Link>
-          <nav className="header-nav" aria-label="主導覽">
-            <Link className="about-link" href="/">
-              產品介紹
-            </Link>
-            <Link className="header-link" href="/s/new">
-              建立排程 <span>↗</span>
-            </Link>
-          </nav>
+          <div id="desktop-identity-slot" />
         </header>
         {children}
         <MobileNavigation />

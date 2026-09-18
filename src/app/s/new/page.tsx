@@ -274,7 +274,7 @@ export default function NewSchedule() {
             {fieldError("endDate")}
           </label>
         </div>
-        <p className="field-hint">最多 31 天；每日時間不跨午夜。</p>
+        <p className="field-hint mobile-date-hint">最多 31 天；每日時間不跨午夜。</p>
         <div className="form-row">
           <label>
             每日開始

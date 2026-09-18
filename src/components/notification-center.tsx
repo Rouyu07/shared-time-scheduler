@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { api } from "@/lib/client";
 
@@ -28,6 +28,39 @@ export default function NotificationCenter() {
   const scheduleId = match?.[1] === "new" ? null : match?.[1] ?? null;
   const [knownScheduleIds, setKnownScheduleIds] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const bellRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const close = useCallback(() => {
+    if (window.matchMedia("(max-width: 720px)").matches) {
+      setClosing(true);
+      closeTimer.current = setTimeout(() => { setOpen(false); setClosing(false); }, 180);
+    } else setOpen(false);
+  }, []);
+  useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
+  useEffect(() => {
+    if (!open || !window.matchMedia("(max-width: 720px)").matches) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    panelRef.current?.querySelector<HTMLButtonElement>(".notification-close")?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); close(); }
+      if (event.key === "Tab") {
+        const targets = panelRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)");
+        if (!targets?.length) return;
+        const first = targets[0], last = targets[targets.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKey);
+      bellRef.current?.focus();
+    };
+  }, [open, close]);
   const [items, setItems] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -110,6 +143,7 @@ export default function NotificationCenter() {
   return (
     <>
       <button
+        ref={bellRef}
         className="notification-bell"
         aria-label={unread ? "通知中心，有未讀通知" : "通知中心"}
         aria-expanded={open}
@@ -131,8 +165,9 @@ export default function NotificationCenter() {
         {unread && <i aria-label="有未讀通知" />}
       </button>
       {open && (
-        <div className="notification-backdrop" role="presentation" onClick={() => setOpen(false)}>
+        <div className={`notification-backdrop${closing ? " closing" : ""}`} role="presentation" onClick={close}>
           <section
+            ref={panelRef}
             className="notification-panel"
             role="dialog"
             aria-modal="true"
@@ -147,7 +182,7 @@ export default function NotificationCenter() {
                     全部標為已讀
                   </button>
                 )}
-                <button className="notification-close" aria-label="關閉通知" onClick={() => setOpen(false)}>
+                <button className="notification-close" aria-label="關閉通知" onClick={close}>
                   ×
                 </button>
               </div>
