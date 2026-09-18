@@ -104,6 +104,9 @@ export default function ScheduleScreen({
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
   useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [section]);
+  useEffect(() => {
     if (!s) return;
     const eventId =
       s.status === "CONFIRMED" && s.meeting
@@ -171,6 +174,17 @@ export default function ScheduleScreen({
     ...(s.isAdmin || section === "manage" ? [["manage", "管理排程"]] : []),
   ];
   const range = (a: string, b: string) => formatRange(a, b, s.timezone);
+  const humanDay = (value: string, includeYear = false) => {
+    const [year, month, date] = value.split("-").map(Number);
+    return new Intl.DateTimeFormat("zh-TW", {
+      timeZone: "UTC",
+      ...(includeYear ? { year: "numeric" as const } : {}),
+      month: "numeric",
+      day: "numeric",
+      weekday: "short",
+    }).format(new Date(Date.UTC(year, month - 1, date, 12)));
+  };
+  const timezoneLabel = s.timezone === "Asia/Taipei" ? "台北時間" : s.timezone;
   const formatStamp = (value: string) =>
     new Intl.DateTimeFormat("zh-TW", {
       timeZone: s.timezone,
@@ -191,6 +205,12 @@ export default function ScheduleScreen({
         : submitted === s.expectedParticipants
           ? "最佳時段待確認"
           : "收集時間中";
+  const compactProgress =
+    s.status === "VOTING"
+      ? `${s.voted} / ${s.expectedParticipants} 已投票`
+      : confirmed
+        ? `${s.expectedParticipants} 人皆已完成`
+        : `${submitted} / ${s.expectedParticipants} 已提交`;
   const setSlot = (stamp: number, value: boolean) => {
     setSelected((old) => {
       const n = new Set(old);
@@ -293,7 +313,7 @@ export default function ScheduleScreen({
         <p>
           {r.unavailable.length
             ? `無法參加：${r.unavailable.join("、")}`
-            : "每個人都能參加這個時段"}
+            : "全員可參加"}
         </p>
       </div>
       <div className="score">
@@ -307,11 +327,11 @@ export default function ScheduleScreen({
   const meetingPanel =
     meeting && confirmed ? (
       <section className="card meeting-card">
-        <div className="eyebrow">IT’S A DATE</div>
-        <h2>我們就約在這個時間。</h2>
+        <div className="eyebrow">會議已成立</div>
+        <h2>{s.title}</h2>
         <p className="meeting-time">{range(meeting.startAt, meeting.endAt)}</p>
-        <p>
-          {s.timezone} · {s.durationMinutes} 分鐘
+        <p className="meeting-meta">
+          {timezoneLabel} · {s.durationMinutes} 分鐘
         </p>
         {meeting.location && <p>地點：{meeting.location}</p>}
         {meeting.meetingUrl && (
@@ -346,7 +366,7 @@ export default function ScheduleScreen({
             className="button secondary"
             href={`/api/schedules/${id}/calendar`}
           >
-            下載 .ics ↓
+            下載 ICS ↓
           </a>
         </div>
         <p className="field-hint">
@@ -364,7 +384,9 @@ export default function ScheduleScreen({
       )
     : null;
   return (
-    <main className="workspace">
+    <main
+      className={`workspace section-${section} ${!s.me ? "guest-workspace" : ""}`}
+    >
       {confirmEmptyAvailability && (
         <div className="dialog-backdrop" role="presentation">
           <section
@@ -544,6 +566,13 @@ export default function ScheduleScreen({
         </button>
       </div>
       {copyText && <input aria-label="分享連結" readOnly value={copyText} />}
+      <section className="compact-schedule-summary" aria-label="排程摘要">
+        <div>
+          <h1>{s.title}</h1>
+          <p><span className="dot" />{statusLabel}</p>
+        </div>
+        <strong>{compactProgress}</strong>
+      </section>
       {(s.me || s.isAdmin) && (
         <section className="identity-banner" aria-label="目前瀏覽身分">
           <span className="identity-avatar">
@@ -655,7 +684,7 @@ export default function ScheduleScreen({
           }
         >
           <span className="nav-icon" aria-hidden="true">⌂</span>
-          進度
+          總覽
           {(s.status === "VOTING" || confirmed) && !notificationRead && (
             <i className="notification-dot" aria-label="有新的排程狀態" />
           )}
@@ -705,7 +734,7 @@ export default function ScheduleScreen({
       {!s.me && (
         <section className="card join-panel">
           <div>
-            <h2>一起找出共同時間</h2>
+            <h2>加入這個排程</h2>
             <p>
               {canEdit && s.participants.length < s.expectedParticipants
                 ? "輸入顯示名稱即可加入，不用註冊。"
@@ -736,14 +765,17 @@ export default function ScheduleScreen({
               <button disabled={busy}>加入排程 →</button>
             </form>
           )}
+          <p className="mobile-join-meta">
+            {s.expectedParticipants} 人排程 · {humanDay(s.startDate)}～{humanDay(s.endDate)} · {s.durationMinutes} 分鐘
+          </p>
         </section>
       )}
       {section === "overview" && (
         <>
-          <div className="two-columns">
+          <div className={`two-columns overview-layout ${!s.results.length ? "waiting-overview" : ""}`}>
             <div>
               {meetingPanel ?? (
-                <section className="card">
+                <section className="card overview-recommendation">
                   <div className="section-title">
                     <h2>推薦的好時間</h2>
                     <Link href={`/s/${id}/results`}>完整結果 ↗</Link>
@@ -784,7 +816,7 @@ export default function ScheduleScreen({
                 </section>
               )}
             </div>
-            <aside className="card">
+            <aside className="card overview-members">
               <h2>這次一起的夥伴</h2>
               <p className="field-hint">
                 包含發起者，共 {s.expectedParticipants} 人
@@ -809,6 +841,11 @@ export default function ScheduleScreen({
                 <p className="field-hint">
                   還有 {s.expectedParticipants - s.participants.length}{" "}
                   位夥伴尚未加入
+                </p>
+              )}
+              {!s.results.length && (
+                <p className="mobile-waiting-note">
+                  所有人提交後，系統會整理共同可行時間。
                 </p>
               )}
             </aside>
@@ -871,7 +908,7 @@ export default function ScheduleScreen({
                   onChange={(e) => setComment(e.target.value)}
                   maxLength={500}
                   required
-                  rows={3}
+                rows={1}
                   placeholder="留下你的想法…"
                 />
                 <div className="actions">
@@ -899,32 +936,40 @@ export default function ScheduleScreen({
           <div className="availability-picker availability-mobile">
           <div className="day-navigation">
             <button
-              className="secondary compact"
+              className="date-arrow"
+              aria-label="前一天"
               disabled={day === 0}
               onClick={() => setDay(day - 1)}
             >
-              ←
+              ‹
             </button>
-            <label>
-              選擇日期
-              <select
-                value={day}
-                onChange={(e) => setDay(Number(e.target.value))}
-              >
-                {s.grid.map((d, i) => (
-                  <option value={i} key={d.day}>
-                    {d.day}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="current-day">
+              <strong>{humanDay(s.grid[day].day)}</strong>
+              <small>{s.grid[day].day.slice(0, 4)} 年</small>
+            </div>
             <button
-              className="secondary compact"
+              className="date-arrow"
+              aria-label="後一天"
               disabled={day === s.grid.length - 1}
               onClick={() => setDay(day + 1)}
             >
-              →
+              ›
             </button>
+          </div>
+          <div className="date-chips" aria-label="選擇日期">
+            {s.grid.map((group, index) => (
+              <button
+                type="button"
+                className={index === day ? "active" : ""}
+                aria-pressed={index === day}
+                key={group.day}
+                onClick={() => setDay(index)}
+              >
+                {humanDay(group.day)}
+              </button>
+            ))}
+          </div>
+          <div className="day-bulk-actions">
             <button
               className="text-button"
               disabled={!canEdit || busy}
@@ -1049,13 +1094,20 @@ export default function ScheduleScreen({
         </section>
       )}
       {section === "results" && (
-        <section className="card">
+        <section className="card results-page">
           <h2>完整共同時間</h2>
-          <p className="muted">
+          <p className="muted results-explanation">
             依 {s.durationMinutes} 分鐘完整區間計算；日期先後只影響顯示順序。
           </p>
           {s.results.length ? (
-            s.results.map(resultCard)
+            <div className="results-list">
+              <p className="mobile-result-group">最佳推薦</p>
+              {resultCard(s.results[0], 0)}
+              {s.results.length > 1 && (
+                <p className="mobile-result-group other">其他共同時間</p>
+              )}
+              {s.results.slice(1).map((result, index) => resultCard(result, index + 1))}
+            </div>
           ) : (
             <div className="empty">
               <h3>等待全員提交</h3>
@@ -1112,10 +1164,12 @@ export default function ScheduleScreen({
             複製分享連結
           </button>
           <div className="notice">
-            <b>排程設定</b>
+            <b>排程資訊</b>
             <p>
-              {s.startDate} 至 {s.endDate} · 每日 {s.dailyStartTime}–
-              {s.dailyEndTime} · {s.durationMinutes} 分鐘 · {s.timezone}
+              {humanDay(s.startDate, true)}～{humanDay(s.endDate, true)}
+            </p>
+            <p>
+              每日 {s.dailyStartTime}–{s.dailyEndTime} · {s.durationMinutes} 分鐘 · {timezoneLabel}
             </p>
             <p>建立後基本設定已鎖定。</p>
           </div>
@@ -1143,6 +1197,10 @@ export default function ScheduleScreen({
               <article
                 className={`vote-card ${voteChoice === c.id ? "chosen" : ""}`}
                 key={c.id}
+                onClick={() => {
+                  if (s.me && s.status === "VOTING" && !s.votingClosedAt && !busy)
+                    setVoteChoice(c.id);
+                }}
               >
                 <span className="rank">{String(i + 1).padStart(2, "0")}</span>
                 <div className="result-main">

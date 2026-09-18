@@ -39,6 +39,19 @@ async function expectFixedMobileNavigation(page: Page, primaryCta?: Locator) {
     expect(ctaBox!.y + ctaBox!.height).toBeLessThanOrEqual(navBox!.y + 1);
   }
 }
+
+async function expectMobileWidths(page: Page) {
+  for (const width of [360, 390, 430]) {
+    await page.setViewportSize({ width, height: 844 });
+    await expect(page.locator(".mobile-bottom-nav")).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBeTruthy();
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+}
 test.afterAll(async () => {
   await db.schedule.deleteMany({ where: { publicId: { in: ids } } });
   await db.$disconnect();
@@ -60,8 +73,10 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
     page,
     page.getByRole("link", { name: "建立第一個排程" }),
   );
+  await expectMobileWidths(page);
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
-    path: "test-results/home-mobile.png",
+    path: "test-results/home-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -101,13 +116,15 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await expect(page.getByLabel("填寫截止時間")).toBeVisible();
   await page.getByRole("button", { name: "返回日期時間" }).click();
   await page.getByRole("button", { name: "上一步" }).click();
+  await expectMobileWidths(page);
+  await page.evaluate(() => window.scrollTo(0, 0));
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBeTruthy();
   await page.screenshot({
-    path: "test-results/create-mobile.png",
+    path: "test-results/create-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -189,8 +206,10 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
     guest.getByRole("link", { name: "管理排程", exact: true }),
   ).toHaveCount(0);
   await expect(guest.getByLabel("目前瀏覽身分")).toHaveCount(0);
+  await expectMobileWidths(guest);
+  await guest.evaluate(() => window.scrollTo(0, 0));
   await guest.screenshot({
-    path: "test-results/join-mobile.png",
+    path: "test-results/join-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -200,6 +219,8 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await expect(guest.getByLabel("目前瀏覽身分")).toContainText("小陳");
   await expect(guest.getByLabel("目前瀏覽身分")).toContainText("參與者");
   await guest.getByRole("link", { name: "時間", exact: true }).click();
+  await expect(guest.getByText(/9\/16.*週四/).first()).toBeVisible();
+  await expect(guest.getByText("2027-09-16", { exact: true })).toBeHidden();
   const guestSlots = guest.locator(".availability-mobile .time-slot");
   await expect(guestSlots).toHaveCount(4);
   await guestSlots.first().focus();
@@ -211,8 +232,10 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   ).toBeVisible();
   await guest.getByRole("button", { name: "返回選擇" }).click();
   for (let i = 0; i < 3; i++) await guestSlots.nth(i).click();
+  await expectMobileWidths(guest);
+  await guest.evaluate(() => window.scrollTo(0, 0));
   await guest.screenshot({
-    path: "test-results/availability-mobile.png",
+    path: "test-results/availability-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -236,6 +259,14 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   expect(mobileLayout.saveAboveNavigation).toBeTruthy();
   expect(mobileLayout.slotWidth).toBeGreaterThanOrEqual(44);
   expect(mobileLayout.slotHeight).toBeGreaterThanOrEqual(44);
+  await guest.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const [lastSlotBox, saveBarBox] = await Promise.all([
+    guestSlots.last().boundingBox(),
+    guest.locator(".save-bar").boundingBox(),
+  ]);
+  expect(lastSlotBox).not.toBeNull();
+  expect(saveBarBox).not.toBeNull();
+  expect(lastSlotBox!.y + lastSlotBox!.height).toBeLessThanOrEqual(saveBarBox!.y + 1);
   expect(
     await guest.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -248,17 +279,25 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
     guest,
     guest.getByRole("button", { name: "送出留言" }),
   );
+  await expectMobileWidths(guest);
+  await guest.evaluate(() => window.scrollTo(0, 0));
   await guest.screenshot({
-    path: "test-results/discussion-mobile.png",
+    path: "test-results/discussion-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
   await guest.goto(share);
   await expect(
-    guest.getByRole("heading", { name: "推薦的好時間" }),
+    guest.getByRole("heading", { name: "這次一起的夥伴" }),
   ).toBeVisible();
+  await expectMobileWidths(guest);
+  await expect(
+    guest.getByText("所有人提交後，系統會整理共同可行時間。"),
+  ).toBeVisible();
+  await expectMobileWidths(guest);
+  await guest.evaluate(() => window.scrollTo(0, 0));
   await guest.screenshot({
-    path: "test-results/waiting-mobile.png",
+    path: "test-results/waiting-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -291,8 +330,9 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await expect(
     guest.getByRole("heading", { name: "完整共同時間" }),
   ).toBeVisible();
+  await guest.evaluate(() => window.scrollTo(0, 0));
   await guest.screenshot({
-    path: "test-results/results-mobile.png",
+    path: "test-results/results-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -301,8 +341,10 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await guest.getByRole("button", { name: "選這個時段" }).first().click();
   await guest.getByRole("button", { name: "送出投票" }).click();
   await expect(guest.getByRole("status")).toContainText("投票已更新");
+  await expectMobileWidths(guest);
+  await guest.evaluate(() => window.scrollTo(0, 0));
   await guest.screenshot({
-    path: "test-results/vote-mobile.png",
+    path: "test-results/vote-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -329,7 +371,7 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await expect(confirmation).toContainText("圖書館討論室");
   await expect(confirmation).toContainText("Asia/Taipei");
   await page.screenshot({
-    path: "test-results/confirmation-mobile.png",
+    path: "test-results/confirmation-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });
@@ -345,7 +387,7 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await page.setViewportSize({ width: 1280, height: 800 });
   await expect(page.locator(".mobile-bottom-nav")).toBeHidden();
   await expect(
-    page.getByRole("heading", { name: "我們就約在這個時間。" }),
+    page.getByRole("heading", { name: "瀏覽器驗收・專題討論" }),
   ).toBeVisible();
   await expect(
     page.getByRole("link", { name: "加入 Google Calendar" }),
@@ -360,11 +402,11 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   });
   await guest.reload();
   await expect(guest.getByLabel("有新的排程狀態")).toBeVisible();
-  await guest.getByRole("link", { name: /^進度/ }).click();
+  await guest.getByRole("link", { name: /^總覽/ }).click();
   await expect(guest.getByText("會議已確認", { exact: false }).first()).toBeVisible();
   await guest.goto(`${share}/confirmed`);
   await expect(
-    guest.getByRole("heading", { name: "我們就約在這個時間。" }),
+    guest.getByRole("heading", { name: "瀏覽器驗收・專題討論" }),
   ).toBeVisible();
   await expect(guest.getByLabel("有新的排程狀態")).toHaveCount(0);
   expect(
@@ -372,8 +414,10 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBeTruthy();
+  await expectMobileWidths(guest);
+  await guest.evaluate(() => window.scrollTo(0, 0));
   await guest.screenshot({
-    path: "test-results/confirmed-mobile.png",
+    path: "test-results/confirmed-mobile-v2.png",
     fullPage: false,
     animations: "disabled",
   });

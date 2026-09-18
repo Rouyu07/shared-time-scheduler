@@ -6,8 +6,8 @@ import { usePathname } from "next/navigation";
 const publicItems = [
   { href: "/", label: "首頁", icon: "⌂" },
   { href: "/s/new", label: "建立", icon: "+" },
-  { href: "/#how-it-works", label: "流程", icon: "✓" },
-  { href: "/#about", label: "關於", icon: "•••" },
+  { href: "/#how-it-works", label: "排程", icon: "✓" },
+  { href: "/#about", label: "更多", icon: "•••" },
 ];
 
 export default function MobileNavigation() {

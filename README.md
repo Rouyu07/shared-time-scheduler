@@ -79,7 +79,7 @@ uv run uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 8. 支援留言與刪除權限、截止、取消後唯讀、Google Calendar 預填、ICS 與 VALARM。
 9. 頁面與 API 設為 noindex／no-store；Cookie 為 HttpOnly、SameSite=Lax，正式環境應啟用 Secure。
 
-Desktop 的可行時間採多日期橫向矩陣，每日可全選／清除，時間格支援拖曳及方向鍵移動。Mobile 全站提供固定底部導覽：公開首頁與建立頁使用「首頁／建立／流程／關於」，排程工作區使用「進度／時間／討論／更多」。建立排程在 Mobile 依「基本資訊／日期時間／確認」分為三步，可行時間則以單日清單切換。導覽支援 iPhone safe-area，可行時間與投票的 Sticky CTA 都會固定在導覽列上方。投票及正式會議狀態會顯示通知點；使用者進入相應結果頁後會在該瀏覽器標記已讀。頁面輪詢發現會議成立時會顯示通知對話框。正式會議建立與留言刪除皆有二次確認。建立表單會在欄位旁顯示可修正的錯誤並聚焦第一個錯誤欄位。
+Desktop 的可行時間採多日期橫向矩陣，每日可全選／清除，時間格支援拖曳及方向鍵移動。Mobile 全站提供固定底部導覽：公開首頁與建立頁使用「首頁／建立／排程／更多」，排程工作區使用「總覽／時間／討論／更多」。排程工作頁使用緊湊摘要顯示活動、狀態與進度，詳細日期、時區與設定集中於「更多」。建立排程在 Mobile 依「基本資訊／日期時間／確認」分為三步，可行時間以中文單日日期切換與 chips 操作。導覽支援 iPhone safe-area，可行時間、投票與討論輸入的固定 Action Area 會位於導覽列上方，內容區保留對應捲動空間。投票及正式會議狀態會顯示通知點；使用者進入相應結果頁後會在該瀏覽器標記已讀。頁面輪詢發現會議成立時會顯示通知對話框。正式會議建立與留言刪除皆有二次確認。建立表單會在欄位旁顯示可修正的錯誤並聚焦第一個錯誤欄位。
 
 ## 測試
 
@@ -103,6 +103,8 @@ E2E 使用隔離 Cookie／Browser Context，主流程以建立者、參與者 A�
 2026-09-16 本機驗證結果：Python 9 項（含 PostgreSQL 最後提交、投票結束競態與截止規則）、TypeScript 6 項、Prisma/PostgreSQL 整合 3 項、Playwright E2E 4 項全部通過；`next build --webpack` 通過。Alembic revision 已實際由 `20260916_0001` 升為 `20260916_0002 (head)`。升版前後業務資料筆數一致：`schedules` 1、`participants` 1，其餘業務表 0；既有資料未刪除或重設。所有 19 個 instant 欄位已核對為 timezone-aware。
 
 2026-09-17 Mobile UX 重構驗證結果：Python 9 項、TypeScript 6 項、Prisma/PostgreSQL 整合 3 項、Playwright E2E 4 項全部通過；Production Build 通過。Alembic 維持 `20260916_0002 (head)`，本輪未修改後端、schema 或 migration。
+
+2026-09-18 Mobile UX 第二輪精修：排程工作區改用 Compact Schedule Summary，等待、推薦、投票、正式會議與討論頁縮短進入主要任務的距離；Mobile Action Area 與 Bottom Navigation 分層並保留完整內容捲動空間；日期切換改為中文日期與 chips。第二輪截圖使用 `*-mobile-v2.png` 命名，保留第一輪成果。Python 9 項、TypeScript 6 項、Prisma/PostgreSQL 整合 3 項、Playwright E2E 4 項與 Production Build 全部通過。
 
 正式建置前先停止開發中的 app，避免兩個程序同時寫入 `.next`：
 
