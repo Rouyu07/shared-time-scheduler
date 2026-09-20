@@ -627,7 +627,6 @@ export default function ScheduleScreen({
         >
           分享排程 ↗
         </button>
-        <div className="heading-mark">◷</div>
       </div>
       {s.description && <p className="description prewrap">{s.description}</p>}
       <section className="stats">

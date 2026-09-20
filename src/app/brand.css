@@ -2276,7 +2276,7 @@ footer {
   html { scroll-padding-top: 116px; }
   .notification-bell { top: calc((var(--desktop-header-height) - 44px) / 2); right: max(88px, calc((100vw - 1216px) / 2 + 56px)); color: #fff; }
   .workspace-share, .identity-banner, .mobile-date-hint { display: none; }
-  .heading-share { display: inline-flex; flex-shrink: 0; }
+  .heading-share { display: inline-flex; flex-shrink: 0; order: 1; align-self: flex-start; }
   .schedule-heading > div:first-child { min-width: 0; overflow-wrap: anywhere; }
   .desktop-identity { position: relative; }
   .desktop-avatar { width: 44px; height: 44px; min-height: 44px; padding: 0; display: grid; place-items: center; background: transparent; color: inherit; border: 0; }
@@ -2286,4 +2286,23 @@ footer {
 @media (min-width: 721px) and (max-width: 800px) {
   body { --desktop-header-height: 84px; }
   html { scroll-padding-top: 100px; }
+}
+
+/* Keep desktop creation fields grouped within Steps 01 and 02. */
+@media (min-width: 721px) {
+  .creation-layout .mobile-step-panel:nth-of-type(-n + 2) label {
+    gap: 7px;
+  }
+  .creation-layout .mobile-step-panel:nth-of-type(-n + 2) > :is(label, .form-row) ~ :is(label, .form-row) {
+    margin-top: 22px;
+  }
+}
+
+.creation-layout .field-label-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.creation-layout label:has(> .field-label-row) {
+  gap: 7px;
 }

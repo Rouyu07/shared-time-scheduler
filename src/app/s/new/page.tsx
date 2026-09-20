@@ -245,7 +245,7 @@ export default function NewSchedule() {
           </label>
         </div>
         <label>
-          補充說明 <span className="optional">選填</span>
+          <span className="field-label-row">補充說明 <span className="optional">選填</span></span>
           <textarea
             name="description"
             placeholder="討論主題、需要準備的東西……"
@@ -345,7 +345,7 @@ export default function NewSchedule() {
           <span className="section-number">03</span> 確認並建立排程
         </h2>
         <label>
-          填寫截止時間 <span className="optional">選填，依上述時區</span>
+          <span className="field-label-row">填寫截止時間 <span className="optional">選填，依上述時區</span></span>
           <input name="deadline" type="datetime-local" />
         </label>
         <div className="notice">
