@@ -1503,21 +1503,37 @@ footer {
 
 .app-toast {
   position: fixed;
-  top: 50%;
+  top: calc(108px + env(safe-area-inset-top));
   left: 50%;
-  transform: translate(-50%, -50%);
+  transform: translateX(-50%);
   pointer-events: none;
   z-index: 120;
   display: grid;
   gap: 3px;
   width: min(390px, calc(100vw - 32px));
-  padding: 20px 22px;
+  padding: 20px 54px 20px 22px;
   font-size: 17px;
   border: 1px solid #cfd8c9;
   border-left: 4px solid #678a62;
   border-radius: 13px;
   background: #fff;
   box-shadow: 0 14px 42px rgb(24 29 27 / 18%);
+}
+
+.toast-close {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  pointer-events: auto;
+}
+@media (max-width: 720px) {
+  .app-toast { top: calc(70px + env(safe-area-inset-top)); }
 }
 
 .app-toast.error {
@@ -2288,14 +2304,15 @@ footer {
   html { scroll-padding-top: 100px; }
 }
 
-/* Keep desktop creation fields grouped within Steps 01 and 02. */
-@media (min-width: 721px) {
-  .creation-layout .mobile-step-panel:nth-of-type(-n + 2) label {
-    gap: 7px;
-  }
-  .creation-layout .mobile-step-panel:nth-of-type(-n + 2) > :is(label, .form-row) ~ :is(label, .form-row) {
-    margin-top: 22px;
-  }
+/* Consistent field groups in all three creation steps, on both layouts. */
+.creation-layout .mobile-step-panel label {
+  gap: 7px;
+}
+.creation-layout .mobile-step-panel > :is(label, .form-row) ~ :is(label, .form-row) {
+  margin-top: 22px;
+}
+.creation-layout .form-row {
+  row-gap: 22px;
 }
 
 .creation-layout .field-label-row {

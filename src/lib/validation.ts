@@ -18,7 +18,7 @@ export const createSchema = z
     dailyEndTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
     durationMinutes: z.coerce.number().int().min(30).max(1410).multipleOf(30),
     timezone: z.string().max(64).default("Asia/Taipei"),
-    deadline: z.string().max(30).default(""),
+    deadline: z.string().min(1, "請設定填寫截止時間").max(30),
   })
   .superRefine((v, ctx) => {
     const issue = (message: string) =>

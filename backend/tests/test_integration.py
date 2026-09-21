@@ -20,7 +20,7 @@ def make_schedule(expected=2):
             expected_participants=expected, start_date=date(2027, 9, 16),
             end_date=date(2027, 9, 16), daily_start_time=time(19),
             daily_end_time=time(21), duration_minutes=60,
-            timezone="Asia/Taipei",
+            timezone="Asia/Taipei", deadline=datetime(2027, 9, 15, 18),
         ))
     CREATED.append(result[0])
     return result
@@ -31,6 +31,15 @@ def cleanup():
     yield
     with SessionLocal() as db:
         db.execute(delete(Schedule).where(Schedule.public_id.in_(CREATED)))
+        db.commit()
+
+
+def expire(public_id):
+    # Only mutate fixtures created by this module, never existing schedules.
+    assert public_id in CREATED
+    with SessionLocal() as db:
+        schedule = db.scalar(select(Schedule).where(Schedule.public_id == public_id))
+        schedule.deadline = service.now() - timedelta(seconds=1)
         db.commit()
 
 
@@ -64,6 +73,7 @@ def test_capacity_cross_schedule_voting_and_concurrent_confirmation():
         assert service.present(service.get_schedule(db, public_id), admin, owner)["results"] == []
     with SessionLocal() as db:
         service.save_availability(db, public_id, selected, guests[0])
+    expire(public_id)
     with SessionLocal() as db:
         view = service.present(service.get_schedule(db, public_id), admin, owner)
         assert view["status"] == "VOTING"
@@ -100,7 +110,7 @@ def test_capacity_cross_schedule_voting_and_concurrent_confirmation():
             service.cancel(db, public_id, foreign_admin)
 
 
-def test_concurrent_last_submissions_create_one_candidate_set():
+def test_concurrent_last_submissions_wait_then_concurrent_deadline_reads_settle_once():
     public_id, admin, owner = make_schedule()
     with SessionLocal() as db:
         guest = service.join(db, public_id, "Guest", None)
@@ -118,11 +128,28 @@ def test_concurrent_last_submissions_create_one_candidate_set():
         list(pool.map(submit, [owner, guest]))
 
     with SessionLocal() as db:
+        before = service.get_schedule(db, public_id)
+        assert before.status.value == "COLLECTING"
+        assert not before.candidate_times
+        assert not service.present(before)["results"]
+        types = {n["type"] for n in service.list_notifications(db, public_id, owner)}
+        assert "RECOMMENDATION_READY" not in types and "VOTING_STARTED" not in types
+    expire(public_id)
+    def read(_):
+        with SessionLocal() as db:
+            return service.present(service.get_schedule(db, public_id))
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        views = list(pool.map(read, range(3)))
+    assert all(len(v["candidates"]) == 3 for v in views)
+    with SessionLocal() as db:
         final = service.get_schedule(db, public_id)
         assert final.status.value == "VOTING"
         assert len(final.candidate_times) == 3
         assert len({(c.start_at, c.end_at) for c in final.candidate_times}) == 3
         assert all(p.availability_submitted_at is not None for p in final.participants)
+        notifications = db.scalars(select(Notification).where(Notification.schedule_id == final.id)).all()
+        assert sum(n.type == "RECOMMENDATION_READY" for n in notifications) == 2
+        assert sum(n.type == "VOTING_STARTED" for n in notifications) == 2
 
 
 def test_vote_and_close_race_stays_consistent():
@@ -138,6 +165,7 @@ def test_vote_and_close_race_stays_consistent():
         service.save_availability(db, public_id, slots, owner)
     with SessionLocal() as db:
         service.save_availability(db, public_id, slots, guest)
+    expire(public_id)
     with SessionLocal() as db:
         candidate_id = service.get_schedule(db, public_id).candidate_times[0].id
 
@@ -195,6 +223,7 @@ def prepare_voting(expected=3):
     for token in [owner, *guests]:
         with SessionLocal() as db:
             service.save_availability(db, public_id, slots, token)
+    expire(public_id)
     with SessionLocal() as db:
         candidates = service.present(service.get_schedule(db, public_id), admin, owner)["candidates"]
     return public_id, admin, owner, guests, candidates
@@ -282,3 +311,74 @@ def test_notification_read_and_read_all_persist():
     with SessionLocal() as db:
         assert all(item["readAt"] for item in service.list_notifications(db, public_id, owner))
         assert any(not item["readAt"] for item in service.list_notifications(db, public_id, guests[0]))
+
+
+def test_partial_and_all_submissions_stay_editable_and_latest_save_wins(monkeypatch):
+    public_id, admin, owner = make_schedule()
+    with SessionLocal() as db:
+        guest = service.join(db, public_id, "Guest", None)
+        s = service.get_schedule(db, public_id)
+        deadline = s.deadline
+        slots = [datetime.fromisoformat(x["startAt"].replace("Z", "+00:00")) for x in service.slot_grid(service.rules_of(s))[0]["slots"]]
+        service.save_availability(db, public_id, slots, owner)
+    with SessionLocal() as db:
+        partial = service.present(service.get_schedule(db, public_id), admin, owner)
+        assert partial["status"] == "COLLECTING" and not partial["results"] and not partial["candidates"]
+        service.save_availability(db, public_id, [], guest)
+    monkeypatch.setattr(service, "now", lambda: deadline - timedelta(microseconds=1))
+    with SessionLocal() as db:
+        before_notifications = service.list_notifications(db, public_id, owner)
+        service.save_availability(db, public_id, slots[:2], owner)
+    with SessionLocal() as db:
+        s = service.get_schedule(db, public_id)
+        view = service.present(s, admin, owner)
+        assert view["status"] == "COLLECTING" and not view["results"] and not view["candidates"]
+        assert sorted(view["me"]["slots"]) == [service.utc_iso(x) for x in slots[:2]]
+        assert len(s.participants) == 2
+        assert len(service.actor(s, owner).availabilities) == 2
+        assert service.list_notifications(db, public_id, owner) == before_notifications
+        with pytest.raises(HTTPException, match="截止"):
+            service.confirm(db, public_id, MeetingInput(start_at=slots[0]), admin)
+    monkeypatch.setattr(service, "now", lambda: deadline)
+    with SessionLocal() as db:
+        with pytest.raises(HTTPException, match="截止"):
+            service.save_availability(db, public_id, slots, owner)
+    with SessionLocal() as db:
+        s = service.get_schedule(db, public_id)
+        view = service.present(s, admin, owner)
+        assert len(view["best"]) == 1 and view["status"] == "COLLECTING"
+        assert s.voting_closed_at is None and s.meeting is None and not s.votes
+        assert view["candidates"] == []
+        assert len(s.candidate_times) == 1
+        assert sorted(view["me"]["slots"]) == [service.utc_iso(x) for x in slots[:2]]
+        service.confirm(db, public_id, MeetingInput(start_at=slots[0]), admin)
+    with SessionLocal() as db:
+        assert service.get_schedule(db, public_id).meeting is not None
+
+
+def test_expiry_uses_saved_data_even_with_missing_members_and_submissions():
+    public_id, admin, owner = make_schedule(3)
+    with SessionLocal() as db:
+        service.join(db, public_id, "Unsubmitted", None)
+        s = service.get_schedule(db, public_id)
+        slots = [datetime.fromisoformat(x["startAt"].replace("Z", "+00:00")) for x in service.slot_grid(service.rules_of(s))[0]["slots"]][:2]
+        service.save_availability(db, public_id, slots, owner)
+    expire(public_id)
+    with SessionLocal() as db:
+        view = service.present(service.get_schedule(db, public_id), admin, owner)
+        assert len(view["best"]) == 1
+        assert view["best"][0]["available"] == ["Owner"]
+        assert view["best"][0]["unavailable"] == ["Unsubmitted"]
+        assert view["meeting"] is None
+
+
+def test_legacy_no_deadline_keeps_collecting():
+    public_id, admin, owner = make_schedule(1)
+    with SessionLocal() as db:
+        s = service.get_schedule(db, public_id)
+        s.deadline = None
+        db.commit()
+        service.save_availability(db, public_id, [], owner)
+    with SessionLocal() as db:
+        view = service.present(service.get_schedule(db, public_id), admin, owner)
+        assert view["status"] == "COLLECTING" and not view["results"] and not view["candidates"]

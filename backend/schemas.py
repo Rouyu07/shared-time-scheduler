@@ -19,7 +19,7 @@ class CreateSchedule(CamelModel):
     daily_end_time: time
     duration_minutes: int = Field(ge=30, le=1410, multiple_of=30)
     timezone: str = Field(default="Asia/Taipei", max_length=64)
-    deadline: datetime | None = None
+    deadline: datetime
 
     @field_validator("deadline", mode="before")
     @classmethod

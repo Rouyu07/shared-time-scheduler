@@ -73,9 +73,14 @@ def voting_finished_notifications(db, s, automatic):
 def get_schedule(db, public_id: str, lock=False):
     if not (16 <= len(public_id) <= 64) or not all(c.isalnum() or c in "_-" for c in public_id): fail("找不到排程。", 404)
     query = select(m.Schedule).where(m.Schedule.public_id == public_id).options(*LOAD)
-    if lock: query = query.with_for_update()
+    # Reads can settle expiry too; serialize them with all schedule mutations.
+    query = query.with_for_update().execution_options(populate_existing=True)
     schedule = db.scalars(query).first()
     if not schedule: fail("找不到排程。", 404)
+    if transition_deadline(db, schedule):
+        # Persist expiry even if the requested mutation is subsequently rejected.
+        db.commit()
+        schedule = db.scalars(query).first()
     return schedule
 
 
@@ -87,17 +92,47 @@ def participant(s, token):
 def admin(s, token):
     if not matches(token, s.admin_token_hash): fail("需要有效的管理連結或管理 Cookie。", 403)
 def collecting(s):
+    if s.deadline and s.deadline <= now(): fail("填寫截止時間已過，可行時間已鎖定。", 409)
     if s.status != m.ScheduleStatus.COLLECTING: fail("已進入投票或排程結束，可行時間已鎖定。", 409)
-    if s.deadline and s.deadline <= now(): fail("填寫截止時間已過。", 409)
 
 
 def results_of(s):
-    return recommend(rules_of(s), [{"name": p.name, "submitted": p.availability_submitted_at is not None, "slots": [a.start_at for a in p.availabilities]} for p in s.participants], s.expected_participants)
+    if s.status not in (m.ScheduleStatus.VOTING, m.ScheduleStatus.CONFIRMED) and (not s.deadline or s.deadline > now()):
+        return []
+    # At expiry, the latest saved slots of every joined participant are final.
+    # Missing submissions have no slots; the scoring algorithm stays unchanged.
+    return recommend(rules_of(s), [{"name": p.name, "submitted": True, "slots": [a.start_at for a in p.availabilities]} for p in s.participants], len(s.participants))
+
+
+def transition_deadline(db, s):
+    """Called with the schedule row locked; candidates also mark a single-best settlement."""
+    if (s.status != m.ScheduleStatus.COLLECTING or not s.deadline
+            or s.deadline > now() or s.candidate_times):
+        return False
+    best = best_of(results_of(s))
+    if not best:
+        return False
+    at = now()
+    for candidate in best:
+        s.candidate_times.append(m.CandidateTime(
+            id=new_id(), schedule_id=s.id,
+            start_at=utc_aware(datetime.fromisoformat(candidate["startAt"].replace("Z", "+00:00"))),
+            end_at=utc_aware(datetime.fromisoformat(candidate["endAt"].replace("Z", "+00:00"))), created_at=at))
+    notify(db, s, "RECOMMENDATION_READY", "推薦結果已產生", f"「{s.title}」的共同時間已整理完成。")
+    if len(best) > 1:
+        s.status = m.ScheduleStatus.VOTING
+        notify(db, s, "VOTING_STARTED", "投票已開始", f"「{s.title}」有多個最佳時段，現在可以投票。")
+    else:
+        owner = creator_participant(s)
+        if owner:
+            notify(db, s, "CONFIRMATION_REQUIRED", "請確認正式時間", f"「{s.title}」已找出最佳時段，請確認正式時間。", [owner])
+    s.updated_at = at
+    return True
 
 
 def present(s, admin_token=None, participant_token=None):
     me = actor(s, participant_token); results = results_of(s); best = best_of(results)
-    candidates = sorted(s.candidate_times, key=lambda c: c.start_at)
+    candidates = sorted(s.candidate_times, key=lambda c: c.start_at) if len(s.candidate_times) > 1 else []
     comments = sorted(s.comments, key=lambda c: c.created_at)
     creator_participant_id = min(s.participants, key=lambda p: p.joined_at).id if s.participants else None
     return {
@@ -149,18 +184,13 @@ def save_availability(db, public_id, slots, token):
     at = now()
     for value in chosen: db.add(m.Availability(id=new_id(), schedule_id=s.id, participant_id=p.id, start_at=utc_aware(value), created_at=at))
     p.availability_submitted_at = at; p.updated_at = at; db.flush(); db.expire(s)
-    s = get_schedule(db, public_id, True); best = best_of(results_of(s))
+    s = db.scalars(select(m.Schedule).where(m.Schedule.public_id == public_id).options(*LOAD).execution_options(populate_existing=True)).one()
     all_submitted = (
         len(s.participants) == s.expected_participants
         and all(p.availability_submitted_at is not None for p in s.participants)
     )
     if all_submitted:
-        notify(db, s, "ALL_AVAILABILITY_SUBMITTED", "所有成員已提交時間", f"「{s.title}」已收齊所有人的可行時間。")
-        notify(db, s, "RECOMMENDATION_READY", "推薦結果已產生", f"「{s.title}」的共同時間已整理完成。")
-    if len(best) > 1:
-        for candidate in best: db.add(m.CandidateTime(id=new_id(), schedule_id=s.id, start_at=utc_aware(datetime.fromisoformat(candidate["startAt"].replace("Z", "+00:00"))), end_at=utc_aware(datetime.fromisoformat(candidate["endAt"].replace("Z", "+00:00"))), created_at=at))
-        s.status = m.ScheduleStatus.VOTING
-        notify(db, s, "VOTING_STARTED", "投票已開始", f"「{s.title}」有多個最佳時段，現在可以投票。")
+        notify(db, s, "ALL_AVAILABILITY_SUBMITTED", "所有成員已提交時間", f"「{s.title}」已收齊所有人的可行時間，截止前仍可修改。")
     s.updated_at = at; db.commit()
 
 
@@ -192,7 +222,7 @@ def confirm(db, public_id, value, token):
     s = get_schedule(db, public_id, True); admin(s, token)
     if s.status in (m.ScheduleStatus.CONFIRMED, m.ScheduleStatus.CANCELLED): fail("此排程已鎖定，無法再修改。", 409)
     best = best_of(results_of(s))
-    if not best: fail("需等待全員提交後才能確認會議。", 409)
+    if not best: fail("需等待填寫截止並產生推薦後才能確認會議。", 409)
     if s.status == m.ScheduleStatus.VOTING and not s.voting_closed_at: fail("請先結束投票。", 409)
     start = utc_aware(value.start_at); chosen = next((b for b in best if utc_aware(datetime.fromisoformat(b["startAt"].replace("Z", "+00:00"))) == start), None)
     if not chosen: fail("請從最佳時段中選擇。")

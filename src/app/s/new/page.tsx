@@ -27,6 +27,7 @@ export default function NewSchedule() {
     required("dailyStartTime", "請選擇每日開始時間。");
     required("dailyEndTime", "請選擇每日結束時間。");
     required("timezone", "請輸入 IANA 時區。");
+    required("deadline", "請設定填寫截止時間。");
     const expected = Number(data.expectedParticipants);
     if (!Number.isInteger(expected) || expected < 1 || expected > 100)
       nextErrors.expectedParticipants = "總人數需為 1 至 100 人。";
@@ -179,7 +180,7 @@ export default function NewSchedule() {
             <span>03</span>
             <div>
               <b>一起決定好時間</b>
-              <p>全員提交後推薦，並列時再投票。</p>
+              <p>填寫截止後推薦，並列時再投票。</p>
             </div>
           </li>
         </ol>
@@ -274,7 +275,6 @@ export default function NewSchedule() {
             {fieldError("endDate")}
           </label>
         </div>
-        <p className="field-hint mobile-date-hint">最多 31 天；每日時間不跨午夜。</p>
         <div className="form-row">
           <label>
             每日開始
@@ -345,12 +345,10 @@ export default function NewSchedule() {
           <span className="section-number">03</span> 確認並建立排程
         </h2>
         <label>
-          <span className="field-label-row">填寫截止時間 <span className="optional">選填，依上述時區</span></span>
-          <input name="deadline" type="datetime-local" />
+          <span className="field-label-row">填寫截止時間 <span className="optional">必填，依上述時區</span></span>
+          <input name="deadline" type="datetime-local" required {...invalidProps("deadline")} />
+          {fieldError("deadline")}
         </label>
-        <div className="notice">
-          建立後設定不可修改。全員提交後才會推薦；若多個最佳時段並列，系統會開啟投票並鎖定可行時間。
-        </div>
         {error && (
           <p className="error" role="alert">
             {error}

@@ -39,15 +39,16 @@ export const rulesOf = (s: Full): Rules => ({
   timezone: s.timezone,
 });
 export function resultsOf(s: Full) {
+  if (s.status !== "VOTING" && s.status !== "CONFIRMED" && (!s.deadline || s.deadline > new Date())) return [];
   return recommend(
     rulesOf(s),
     s.participants.map((p) => ({
       id: p.id,
       name: p.name,
-      submitted: !!p.availabilitySubmittedAt,
+      submitted: true,
       slots: p.availabilities.map((a) => a.startAt.toISOString()),
     })),
-    s.expectedParticipants,
+    s.participants.length,
   );
 }
 function participantOf(s: Full, session: Session) {
@@ -70,20 +71,15 @@ function writable(s: Full) {
     throw new AppError("此排程已鎖定，無法再修改。", 409);
 }
 function collecting(s: Full) {
+  if (s.deadline && s.deadline <= new Date())
+    throw new AppError("填寫截止時間已過，可行時間已鎖定。", 409);
   if (s.status !== "COLLECTING")
     throw new AppError("已進入投票或排程結束，可行時間已鎖定。", 409);
-  if (s.deadline && s.deadline <= new Date())
-    throw new AppError("填寫截止時間已過。", 409);
 }
 export async function getSchedule(id: string) {
   if (!/^[A-Za-z0-9_-]{16,64}$/.test(id))
     throw new AppError("找不到排程。", 404);
-  const s = await db.schedule.findUnique({
-    where: { publicId: id },
-    include: graph,
-  });
-  if (!s) throw new AppError("找不到排程。", 404);
-  return s;
+  return mutate(id, async (_tx, s) => s);
 }
 export function present(s: Full, session: Session) {
   const p = participantOf(s, session);
@@ -117,7 +113,7 @@ export function present(s: Full, session: Session) {
     grid: slotGrid(rulesOf(s)),
     results,
     best: bestOf(results),
-    candidates: s.candidateTimes.map((c) => ({
+    candidates: (s.candidateTimes.length > 1 ? s.candidateTimes : []).map((c) => ({
       id: c.id,
       startAt: c.startAt.toISOString(),
       endAt: c.endAt.toISOString(),
@@ -151,7 +147,7 @@ export function present(s: Full, session: Session) {
 export type ScheduleView = ReturnType<typeof present>;
 
 // All schedule mutations share the same row lock. This serializes capacity checks,
-// last submissions, voting, cancellation and confirmation across every app instance.
+// deadline settlement, submissions, voting, cancellation and confirmation.
 async function mutate<T>(
   id: string,
   fn: (tx: Prisma.TransactionClient, s: Full) => Promise<T>,
@@ -162,10 +158,20 @@ async function mutate<T>(
         { id: string }[]
       >`SELECT id FROM schedules WHERE public_id = ${id} FOR UPDATE`;
       if (!found.length) throw new AppError("找不到排程。", 404);
-      const s = await tx.schedule.findUniqueOrThrow({
+      let s = await tx.schedule.findUniqueOrThrow({
         where: { id: found[0].id },
         include: graph,
       });
+      if (s.status === "COLLECTING" && s.deadline && s.deadline <= new Date() && !s.candidateTimes.length) {
+        const best = bestOf(resultsOf(s));
+        if (best.length) {
+          await tx.candidateTime.createMany({ data: best.map(b => ({
+            scheduleId: s.id, startAt: new Date(b.startAt), endAt: new Date(b.endAt),
+          })) });
+          if (best.length > 1) await tx.schedule.update({ where: { id: s.id }, data: { status: "VOTING" } });
+          s = await tx.schedule.findUniqueOrThrow({ where: { id: s.id }, include: graph });
+        }
+      }
       return fn(tx, s);
     },
     { maxWait: 10000, timeout: 30000 },
@@ -269,24 +275,6 @@ export async function saveAvailability(
       where: { id: p.id },
       data: { availabilitySubmittedAt: new Date() },
     });
-    const updated = await tx.schedule.findUniqueOrThrow({
-      where: { id: s.id },
-      include: graph,
-    });
-    const best = bestOf(resultsOf(updated));
-    if (best.length > 1) {
-      await tx.candidateTime.createMany({
-        data: best.map((b) => ({
-          scheduleId: s.id,
-          startAt: new Date(b.startAt),
-          endAt: new Date(b.endAt),
-        })),
-      });
-      await tx.schedule.update({
-        where: { id: s.id },
-        data: { status: "VOTING" },
-      });
-    }
   });
 }
 export async function vote(id: string, input: unknown, session: Session) {
@@ -340,7 +328,7 @@ export async function confirmMeeting(
     requireAdmin(s, session);
     writable(s);
     const best = bestOf(resultsOf(s));
-    if (!best.length) throw new AppError("需等待全員提交後才能確認會議。", 409);
+    if (!best.length) throw new AppError("需等待填寫截止並產生推薦後才能確認會議。", 409);
     if (s.status === "VOTING" && !s.votingClosedAt)
       throw new AppError("請先結束投票。", 409);
     const chosen = best.find(

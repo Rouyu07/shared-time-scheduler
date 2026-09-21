@@ -2,19 +2,58 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { db } from "../../src/lib/db";
 const ids: string[] = [];
 
-async function expectCenteredToast(page: Page, path: string) {
+async function expectTopToast(page: Page, path: string) {
   const toast = page.locator(".app-toast.success");
   await expect(toast).toBeVisible();
   const geometry = await toast.evaluate(el => {
     const box = el.getBoundingClientRect();
-    return { x: Math.abs(box.x + box.width / 2 - innerWidth / 2), y: Math.abs(box.y + box.height / 2 - innerHeight / 2), padding: parseFloat(getComputedStyle(el).paddingTop), pointer: getComputedStyle(el).pointerEvents };
+    return { x: Math.abs(box.x + box.width / 2 - innerWidth / 2), y: box.y, padding: parseFloat(getComputedStyle(el).paddingTop), pointer: getComputedStyle(el).pointerEvents };
   });
   expect(geometry.x).toBeLessThan(1);
-  expect(geometry.y).toBeLessThan(1);
+  expect(geometry.y).toBeGreaterThanOrEqual(58);
+  expect(geometry.y).toBeLessThanOrEqual(130);
+  await expect(toast.getByRole("button", { name: "關閉提示" })).toBeVisible();
+  await expect(toast).toHaveAttribute("aria-live", "polite");
   expect(geometry.padding).toBeGreaterThan(14);
   expect(geometry.pointer).toBe("none");
   await page.screenshot({ path });
   await expect(toast).toBeHidden({ timeout: 3200 });
+}
+
+async function expectFieldSpacing(page: Page) {
+  const geometry = await page.locator(".mobile-step-panel").evaluateAll(panels => panels
+    .filter(panel => panel.getBoundingClientRect().height > 0)
+    .flatMap(panel => {
+      const fields = Array.from(panel.querySelectorAll<HTMLLabelElement>("label"));
+      return fields.map((field, index) => {
+        const control = field.querySelector("input, select, textarea")!;
+        const previous = fields[index - 1];
+        const previousControl = previous?.querySelector("input, select, textarea");
+        const rowBelow = previous && field.getBoundingClientRect().top > previous.getBoundingClientRect().top + 2;
+        return {
+          gap: parseFloat(getComputedStyle(field).gap),
+          between: rowBelow && previousControl ? field.getBoundingClientRect().top - previousControl.getBoundingClientRect().bottom : null,
+        };
+      });
+    }));
+  expect(geometry.length).toBeGreaterThan(0);
+  for (const field of geometry) {
+    expect(field.gap).toBeGreaterThanOrEqual(6);
+    expect(field.gap).toBeLessThanOrEqual(8);
+    if (field.between !== null) {
+      expect(field.between).toBeGreaterThanOrEqual(18);
+      expect(field.between).toBeLessThanOrEqual(24);
+    }
+  }
+  await expect(page.locator(".mobile-date-hint")).toHaveCount(0);
+  for (const metadata of await page.locator(".field-label-row:visible").all()) {
+    const aligned = await metadata.evaluate(el => {
+      const range = document.createRange();
+      range.selectNodeContents(el.firstChild!);
+      return Math.abs(range.getBoundingClientRect().top - el.querySelector(".optional")!.getBoundingClientRect().top) < 6;
+    });
+    expect(aligned).toBeTruthy();
+  }
 }
 
 async function exerciseDrawer(page: Page) {
@@ -158,6 +197,7 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
     page.getByRole("link", { name: "建立第一個排程" }).click(),
   ]);
   await expect(page.getByLabel("排程名稱")).toBeVisible();
+  await expectFieldSpacing(page);
   await expect(page.getByText("最多 31 天；每日時間不跨午夜。")).toBeHidden();
   await expect(page.locator(".mobile-bottom-nav")).toBeHidden();
   await expect(page.locator(".rex-logo img").first()).toBeVisible();
@@ -172,11 +212,17 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
     page.getByRole("button", { name: "下一步" }),
   );
   await expect(page.getByText("基本資訊", { exact: true })).toBeVisible();
+  await expectFieldSpacing(page);
   await expect(page.getByLabel("開始日期")).toBeHidden();
   await page.getByRole("button", { name: "下一步" }).click();
   await expect(page.getByLabel("開始日期")).toBeVisible();
+  await expectFieldSpacing(page);
+  await page.screenshot({ path: "test-results/create-step-02-spacing.png", fullPage: true });
   await page.getByRole("button", { name: "下一步" }).click();
   await expect(page.getByLabel("填寫截止時間")).toBeVisible();
+  await expectFieldSpacing(page);
+  await expect(page.getByLabel("填寫截止時間")).toHaveAttribute("required", "");
+  await page.screenshot({ path: "test-results/create-step-03-spacing.png", fullPage: true });
   await page.getByRole("button", { name: "返回日期時間" }).click();
   await page.getByRole("button", { name: "上一步" }).click();
   await expectMobileWidths(page);
@@ -204,6 +250,9 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await page.getByLabel("結束日期").fill("2027-09-18");
   await page.getByLabel("每日開始").fill("19:00");
   await page.getByLabel("每日結束").fill("21:00");
+  await page.getByRole("button", { name: "建立排程，取得分享連結" }).click();
+  await expect(page.getByText("請設定填寫截止時間。")).toBeVisible();
+  await page.getByLabel("填寫截止時間").fill("2027-09-15T18:00");
   await page.getByRole("button", { name: "建立排程，取得分享連結" }).click();
   await expect(
     page.getByRole("heading", { name: "邀請大家，找個好時間。" }),
@@ -259,10 +308,10 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   });
   await page.getByRole("button", { name: "儲存我的可行時間" }).click();
   await expect(page.locator(".notice[role='status']")).toContainText("已提交");
-  await expectCenteredToast(page, "test-results/desktop-toast-center.png");
+  await expectTopToast(page, "test-results/desktop-toast-top.png");
   await page.getByRole("link", { name: "共同時間", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "等待全員提交" }),
+    page.getByRole("heading", { name: "等待填寫截止" }),
   ).toBeVisible();
   await page.screenshot({
     path: "test-results/precision-waiting-desktop.png",
@@ -357,7 +406,7 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   ).toBeTruthy();
   await guest.getByRole("button", { name: "儲存我的可行時間" }).click();
   await expect(guest.locator(".app-toast.success")).toContainText("已儲存可行時間");
-  await expectCenteredToast(guest, "test-results/mobile-toast-center.png");
+  await expectTopToast(guest, "test-results/mobile-toast-top.png");
   await guest.screenshot({
     path: "test-results/precision-availability-toast-mobile.png",
     fullPage: false,
@@ -413,9 +462,32 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   };
   const participantB = await joinAndSubmit("小林");
   const otherParticipant = await joinAndSubmit("小吳");
+  await expect(otherParticipant.page.locator(".app-toast.success")).toBeVisible();
+  const before = await (await guest.request.get(`/api/schedules/${id}`)).json();
+  expect(before.status).toBe("COLLECTING");
+  expect(before.best).toEqual([]);
+  expect(before.candidates).toEqual([]);
+  await guest.goto(`${share}/availability`);
+  await expect(guestSlots.first()).toBeEnabled();
+  const notificationsBefore = await (await guest.request.get(`/api/schedules/${id}/notifications`)).json();
+  await guest.getByRole("button", { name: "儲存我的可行時間" }).click();
+  await expect(guest.locator(".app-toast.success")).toBeVisible();
+  await guest.getByRole("button", { name: "關閉提示" }).click();
+  await expect(guest.locator(".app-toast")).toBeHidden();
+  expect(await (await guest.request.get(`/api/schedules/${id}/notifications`)).json()).toEqual(notificationsBefore);
+  await guest.route(`**/api/schedules/${id}/availability`, route => route.abort());
+  await guest.getByRole("button", { name: "儲存我的可行時間" }).click();
+  await expect(guest.locator(".app-toast.error")).toBeVisible();
+  await expect(guest.locator(".app-toast.success")).toHaveCount(0);
+  await guest.unroute(`**/api/schedules/${id}/availability`);
+  await db.schedule.update({ where: { publicId: id }, data: { deadline: new Date(Date.now() - 1000) } });
 
   await guest.goto(`${share}/availability`);
   await expect(guestSlots.first()).toBeDisabled();
+  const rejected = await guest.request.put(`/api/schedules/${id}/availability`, {
+    data: { slots: [] }, headers: { Origin: "http://localhost:3000" },
+  });
+  expect(rejected.status()).toBe(409);
   const bell = guest.getByRole("button", { name: /通知中心/ });
   await expect(bell).toBeVisible();
   const bellBox = await bell.boundingBox();
@@ -426,6 +498,13 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await bell.click();
   const notificationPanel = guest.getByRole("dialog", { name: "通知" });
   await expect(notificationPanel.getByText("投票已開始", { exact: true })).toBeVisible();
+  const beforeClose = await (await guest.request.get(`/api/schedules/${id}/notifications`)).json();
+  await notificationPanel.getByRole("heading", { name: "通知", exact: true }).click();
+  await expect(notificationPanel).toBeVisible();
+  await notificationPanel.getByRole("button", { name: "關閉通知" }).click();
+  await expect(notificationPanel).toBeHidden();
+  expect(await (await guest.request.get(`/api/schedules/${id}/notifications`)).json()).toEqual(beforeClose);
+  await bell.click();
   await expectMobileWidths(guest);
   await guest.screenshot({
     path: "test-results/precision-notifications-mobile.png",
@@ -603,12 +682,18 @@ test("HTTP origin validation, private tokens and locked settings", async ({
     dailyEndTime: "20:00",
     durationMinutes: 60,
     timezone: "Asia/Taipei",
+    deadline: "2027-09-15T18:00",
   };
   const denied = await request.post("/api/schedules", {
     data: body,
     headers: { Origin: "https://foreign.example" },
   });
   expect(denied.status()).toBe(403);
+  const { deadline: _deadline, ...withoutDeadline } = body;
+  const missingDeadline = await request.post("/api/schedules", {
+    data: withoutDeadline, headers: { Origin: "http://localhost:3000" },
+  });
+  expect(missingDeadline.status()).toBe(400);
   const created = await request.post("/api/schedules", {
     data: body,
     headers: { Origin: "http://localhost:3000" },
@@ -649,6 +734,7 @@ test("single best skips voting and only the creator can confirm", async ({
       dailyEndTime: "20:00",
       durationMinutes: 60,
       timezone: "Asia/Taipei",
+    deadline: "2027-09-15T18:00",
     },
     headers: { Origin: "http://localhost:3000" },
   });
@@ -661,6 +747,9 @@ test("single best skips voting and only the creator can confirm", async ({
   await slots.nth(0).click();
   await slots.nth(1).click();
   await page.getByRole("button", { name: "儲存我的可行時間" }).click();
+  await expect(page.locator(".app-toast.success")).toBeVisible();
+  expect((await (await page.request.get(`/api/schedules/${data.publicId}`)).json()).best).toEqual([]);
+  await db.schedule.update({ where: { publicId: data.publicId }, data: { deadline: new Date(Date.now() - 1000) } });
   await page.getByRole("link", { name: "共同時間" }).click();
   await expect(page.locator(".result-card")).toHaveCount(1);
   await expect(page.getByRole("link", { name: "時段投票" })).toHaveCount(0);
@@ -711,7 +800,7 @@ test("expired incomplete schedule can be cancelled and stays read-only", async (
   });
   const share = `/s/${data.publicId}`;
   await page.goto(share);
-  await expect(page.getByText("填寫已截止，但尚未全員提交")).toBeVisible();
+  await expect(page.getByText("填寫已截止，可行時間已鎖定")).toBeVisible();
 
   const anonymousContext = await browser.newContext();
   const anonymous = await anonymousContext.newPage();

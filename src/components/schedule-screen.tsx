@@ -201,7 +201,7 @@ export default function ScheduleScreen({
         ? s.votingClosedAt
           ? "投票已結束・待確認"
           : "投票進行中"
-        : submitted === s.expectedParticipants
+        : s.best.length > 0
           ? "最佳時段待確認"
           : "收集時間中";
   const compactProgress =
@@ -736,9 +736,9 @@ export default function ScheduleScreen({
           此排程已取消，所有資料僅供查看。若曾加入個人行事曆，請自行刪除該活動。
         </div>
       )}
-      {deadlinePassed && submitted < s.expectedParticipants && !closed && (
+      {deadlinePassed && !confirmed && !closed && (
         <div className="notice">
-          填寫已截止，但尚未全員提交。此排程不會產生推薦；建立者可取消並重新建立。
+          填寫已截止，可行時間已鎖定，推薦依截止前最後儲存的資料計算。
         </div>
       )}
       {!s.me && (
@@ -811,7 +811,7 @@ export default function ScheduleScreen({
                       <p>
                         還需 {s.expectedParticipants - submitted} 人提交，
                         <br />
-                        全員填寫後就會顯示最佳時段。
+                        截止前仍可修改，截止後才會顯示最佳時段。
                       </p>
                       {s.me && canEdit && (
                         <Link
@@ -1121,9 +1121,9 @@ export default function ScheduleScreen({
             </div>
           ) : (
             <div className="empty">
-              <h3>等待全員提交</h3>
+              <h3>等待填寫截止</h3>
               <p>
-                目前 {submitted} / {s.expectedParticipants} 人已提交。
+                目前 {submitted} / {s.expectedParticipants} 人已提交，截止前仍可修改。
               </p>
             </div>
           )}
@@ -1241,7 +1241,7 @@ export default function ScheduleScreen({
           </div>
           {s.candidates.length === 0 && (
             <p className="notice">
-              目前沒有投票。全員提交且有多個並列最佳時段時才會啟動。
+              目前沒有投票。填寫截止後有多個並列最佳時段時才會啟動。
             </p>
           )}
           {s.votingClosedAt && (
@@ -1407,7 +1407,7 @@ export default function ScheduleScreen({
                     </form>
                   )}
                 {!s.best.length && !closed && (
-                  <p className="muted">尚未全員提交，暫時不能確認會議。</p>
+                  <p className="muted">填寫截止並產生推薦後，才能確認會議。</p>
                 )}
                 {confirmed && (
                   <Link className="button primary" href={`/s/${id}/confirmed`}>

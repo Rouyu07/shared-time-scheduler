@@ -72,7 +72,7 @@ export default function Home() {
         <article>
           <span>02 / 填寫</span>
           <h2>留給每個人選擇</h2>
-          <p>點選自己的可行時間，等全員提交，再找出最佳交集。</p>
+          <p>點選自己的可行時間，截止前可修改，截止後找出最佳交集。</p>
         </article>
         <article>
           <span>03 / 決定</span>

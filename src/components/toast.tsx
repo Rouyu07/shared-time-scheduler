@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 export type ToastMessage = {
   id: number;
@@ -16,11 +16,13 @@ export default function Toast({
   message: ToastMessage | null;
   onDismiss: () => void;
 }) {
+  const dismissRef = useRef(onDismiss);
+  dismissRef.current = onDismiss;
   useEffect(() => {
     if (!message) return;
-    const timer = window.setTimeout(onDismiss, 2600);
+    const timer = window.setTimeout(() => dismissRef.current(), 2600);
     return () => window.clearTimeout(timer);
-  }, [message, onDismiss]);
+  }, [message]);
 
   if (!message) return null;
   return (
@@ -29,6 +31,7 @@ export default function Toast({
       role={message.kind === "error" ? "alert" : "status"}
       aria-live="polite"
     >
+      <button type="button" className="toast-close" aria-label="關閉提示" onClick={onDismiss}>×</button>
       <b>{message.title}</b>
       {message.detail && <span>{message.detail}</span>}
     </div>

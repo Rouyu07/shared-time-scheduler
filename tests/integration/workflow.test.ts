@@ -26,17 +26,22 @@ const base = {
   dailyEndTime: "21:00",
   durationMinutes: 60,
   timezone: "Asia/Taipei",
+  deadline: "2027-09-15T18:00",
 };
 async function create(extra = {}) {
   const s = await createSchedule({ ...base, ...extra });
   ids.push(s.publicId);
   return s;
 }
+async function expire(id: string) {
+  assert.ok(ids.includes(id));
+  await db.schedule.update({ where: { publicId: id }, data: { deadline: new Date(Date.now() - 1000) } });
+}
 after(async () => {
   await db.schedule.deleteMany({ where: { publicId: { in: ids } } });
   await db.$disconnect();
 });
-test("capacity and case-insensitive names; all-submit tie starts voting; freeze, vote, close and confirm", async () => {
+test("capacity and case-insensitive names; deadline tie starts voting; freeze, vote, close and confirm", async () => {
   const s = await create();
   const auth = { admin: s.admin, participant: s.participant };
   await assert.rejects(joinSchedule(s.publicId, { name: "owner" }, {}), /名稱/);
@@ -54,9 +59,11 @@ test("capacity and case-insensitive names; all-submit tie starts voting; freeze,
   assert.equal(present(await getSchedule(s.publicId), auth).results.length, 0);
   await assert.rejects(
     confirmMeeting(s.publicId, { startAt: slots[0] }, auth),
-    /全員/,
+    /截止/,
   );
   await saveAvailability(s.publicId, { slots }, guest);
+  assert.equal(present(await getSchedule(s.publicId), auth).results.length, 0);
+  await expire(s.publicId);
   let view = present(await getSchedule(s.publicId), auth);
   assert.equal(view.status, "VOTING");
   assert.equal(view.candidates.length, 3);
@@ -114,6 +121,7 @@ test("unique best skips voting, session isolation and cancellation keep data rea
     /無效/,
   );
   await saveAvailability(a.publicId, { slots }, auth);
+  await expire(a.publicId);
   const view = present(await getSchedule(a.publicId), auth);
   assert.equal(view.status, "COLLECTING");
   assert.equal(view.best.length, 1);
@@ -158,6 +166,7 @@ test("all participants voting closes automatically without creating a meeting", 
   const slots = slotGrid(base)[0].slots.map((slot) => slot.startAt);
   await saveAvailability(s.publicId, { slots }, auth);
   await saveAvailability(s.publicId, { slots }, guest);
+  await expire(s.publicId);
   const open = present(await getSchedule(s.publicId), auth);
   await vote(s.publicId, { candidateId: open.candidates[0].id }, auth);
   assert.equal((await getSchedule(s.publicId)).votingClosedAt, null);

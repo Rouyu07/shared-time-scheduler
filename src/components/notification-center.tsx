@@ -40,9 +40,10 @@ export default function NotificationCenter() {
   }, []);
   useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
   useEffect(() => {
-    if (!open || !window.matchMedia("(max-width: 720px)").matches) return;
+    if (!open) return;
+    const mobile = window.matchMedia("(max-width: 720px)").matches;
     const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    if (mobile) document.body.style.overflow = "hidden";
     panelRef.current?.querySelector<HTMLButtonElement>(".notification-close")?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") { event.preventDefault(); close(); }
