@@ -1,7 +1,32 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/client";
+
+const DRAFT_KEY = "shared-time-scheduler:create-schedule-draft";
+const DRAFT_FIELDS = [
+  "title",
+  "creatorName",
+  "expectedParticipants",
+  "description",
+  "startDate",
+  "endDate",
+  "dailyStartTime",
+  "dailyEndTime",
+  "durationMinutes",
+  "deadline",
+] as const;
+
+function localDateTimeValue(date: Date) {
+  const part = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${part(date.getMonth() + 1)}-${part(date.getDate())}T${part(date.getHours())}:${part(date.getMinutes())}`;
+}
+
+function resizeTextarea(textarea: HTMLTextAreaElement) {
+  textarea.style.height = "auto";
+  textarea.style.height = `${textarea.scrollHeight}px`;
+}
+
 export default function NewSchedule() {
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
@@ -12,10 +37,49 @@ export default function NewSchedule() {
     adminLink: string;
   } | null>(null);
   const [copied, setCopied] = useState("");
+  const formRef = useRef<HTMLFormElement>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+    let draft: Record<string, unknown> | null = null;
+    try {
+      const stored = localStorage.getItem(DRAFT_KEY);
+      if (stored) draft = JSON.parse(stored) as Record<string, unknown>;
+    } catch {
+      localStorage.removeItem(DRAFT_KEY);
+    }
+    if (draft) {
+      for (const name of DRAFT_FIELDS) {
+        const control = form.elements.namedItem(name);
+        if (control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement || control instanceof HTMLSelectElement) {
+          const value = draft[name];
+          if (typeof value === "string") control.value = value;
+        }
+      }
+    } else {
+      const deadline = form.elements.namedItem("deadline");
+      if (deadline instanceof HTMLInputElement) deadline.value = localDateTimeValue(new Date());
+    }
+    if (descriptionRef.current) resizeTextarea(descriptionRef.current);
+  }, []);
+
+  function saveDraft(form: HTMLFormElement) {
+    const values = Object.fromEntries(new FormData(form));
+    const draft = Object.fromEntries(DRAFT_FIELDS.map((name) => [name, String(values[name] ?? "")]));
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch {
+      // The form remains usable when browser storage is unavailable.
+    }
+  }
+
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const data = Object.fromEntries(new FormData(form));
+    data.timezone = "Asia/Taipei";
     const nextErrors: Record<string, string> = {};
     const required = (name: string, message: string) => {
       if (!String(data[name] ?? "").trim()) nextErrors[name] = message;
@@ -26,11 +90,13 @@ export default function NewSchedule() {
     required("endDate", "請選擇結束日期。");
     required("dailyStartTime", "請選擇每日開始時間。");
     required("dailyEndTime", "請選擇每日結束時間。");
-    required("timezone", "請輸入 IANA 時區。");
     required("deadline", "請設定填寫截止時間。");
     const expected = Number(data.expectedParticipants);
     if (!Number.isInteger(expected) || expected < 1 || expected > 100)
       nextErrors.expectedParticipants = "總人數需為 1 至 100 人。";
+    const duration = Number(data.durationMinutes);
+    if (![30, 60, 90, 120, 150, 180, 240].includes(duration))
+      nextErrors.durationMinutes = "請選擇有效的會議時長。";
     if (data.startDate && data.endDate) {
       const days =
         (Date.parse(String(data.endDate)) - Date.parse(String(data.startDate))) /
@@ -53,13 +119,19 @@ export default function NewSchedule() {
     const firstInvalid = Object.keys(nextErrors)[0];
     if (firstInvalid) {
       (form.elements.namedItem(firstInvalid) as HTMLElement | null)?.focus();
-      setError("請修正標示的欄位後再建立排程。");
+      setError("必填表格請填寫完成");
       return;
     }
     setBusy(true);
     setError("");
     try {
-      setCreated(await api("", "POST", data));
+      const result = await api("", "POST", data);
+      try {
+        localStorage.removeItem(DRAFT_KEY);
+      } catch {
+        // A successful API response remains successful if storage is unavailable.
+      }
+      setCreated(result);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -195,7 +267,13 @@ export default function NewSchedule() {
           THOUGHTFULLY BUILT BY <b>REX</b>
         </div>
       </aside>
-      <form onSubmit={submit} className="card form" noValidate>
+      <form
+        ref={formRef}
+        onSubmit={submit}
+        onChange={(event) => saveDraft(event.currentTarget)}
+        className="card form"
+        noValidate
+      >
         <ol className="mobile-step-progress" aria-label="建立排程進度">
           {[1, 2, 3].map((step) => (
             <li className={mobileStep >= step ? "active" : ""} key={step}>
@@ -248,10 +326,13 @@ export default function NewSchedule() {
         <label>
           <span className="field-label-row">補充說明 <span className="optional">選填</span></span>
           <textarea
+            ref={descriptionRef}
             name="description"
             placeholder="討論主題、需要準備的東西……"
             maxLength={5000}
             rows={3}
+            className="auto-resize-textarea"
+            onInput={(event) => resizeTextarea(event.currentTarget)}
           />
         </label>
         <div className="mobile-step-actions">
@@ -281,7 +362,7 @@ export default function NewSchedule() {
             <input
               name="dailyStartTime"
               type="time"
-              defaultValue="18:00"
+              defaultValue="00:00"
               required
               {...invalidProps("dailyStartTime")}
             />
@@ -299,40 +380,21 @@ export default function NewSchedule() {
             {fieldError("dailyEndTime")}
           </label>
         </div>
-        <div className="form-row">
+        <div className="form-row single-field-row">
           <label>
             會議時長
-            <select name="durationMinutes" defaultValue="60">
+            <select
+              name="durationMinutes"
+              defaultValue="60"
+              {...invalidProps("durationMinutes")}
+            >
               {[30, 60, 90, 120, 150, 180, 240].map((n) => (
                 <option value={n} key={n}>
                   {n} 分鐘
                 </option>
               ))}
             </select>
-          </label>
-          <label>
-            時區
-            <input
-              name="timezone"
-              defaultValue="Asia/Taipei"
-              list="timezones"
-              required
-              {...invalidProps("timezone")}
-            />
-            {fieldError("timezone")}
-            <datalist id="timezones">
-              {[
-                "Asia/Taipei",
-                "Asia/Tokyo",
-                "Asia/Hong_Kong",
-                "America/New_York",
-                "America/Los_Angeles",
-                "Europe/London",
-                "UTC",
-              ].map((t) => (
-                <option key={t} value={t} />
-              ))}
-            </datalist>
+            {fieldError("durationMinutes")}
           </label>
         </div>
         <div className="mobile-step-actions split">
@@ -354,7 +416,7 @@ export default function NewSchedule() {
             {error}
           </p>
         )}
-        <button className="primary large" disabled={busy}>
+        <button className="primary large create-submit" disabled={busy}>
           {busy ? "建立中…" : "建立排程，取得分享連結 ↗"}
         </button>
         <div className="mobile-step-actions back-only">

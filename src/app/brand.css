@@ -2314,11 +2314,21 @@ footer {
 .creation-layout .form-row {
   row-gap: 22px;
 }
+.creation-layout .single-field-row {
+  grid-template-columns: 1fr;
+}
+
+.creation-layout .create-submit {
+  margin-top: 24px;
+}
 
 .creation-layout .field-label-row {
   display: flex;
   align-items: baseline;
   gap: 7px;
+}
+.creation-layout .auto-resize-textarea {
+  overflow-y: hidden;
 }
 .creation-layout label:has(> .field-label-row) {
   gap: 7px;

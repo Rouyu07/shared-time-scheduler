@@ -26,9 +26,12 @@ async function expectFieldSpacing(page: Page) {
     .flatMap(panel => {
       const fields = Array.from(panel.querySelectorAll<HTMLLabelElement>("label"));
       return fields.map((field, index) => {
-        const control = field.querySelector("input, select, textarea")!;
+        const visibleControl = (label: HTMLLabelElement) =>
+          Array.from(label.querySelectorAll<HTMLElement>("input, select, textarea"))
+            .find(element => element.getBoundingClientRect().height > 0);
+        const control = visibleControl(field)!;
         const previous = fields[index - 1];
-        const previousControl = previous?.querySelector("input, select, textarea");
+        const previousControl = previous ? visibleControl(previous) : undefined;
         const rowBelow = previous && field.getBoundingClientRect().top > previous.getBoundingClientRect().top + 2;
         return {
           gap: parseFloat(getComputedStyle(field).gap),
@@ -140,6 +143,101 @@ test.afterAll(async () => {
   await db.schedule.deleteMany({ where: { publicId: { in: ids } } });
   await db.$disconnect();
 });
+test("create form defaults, auto-resize, validation and local draft lifecycle", async ({ page }) => {
+  const draftKey = "shared-time-scheduler:create-schedule-draft";
+  let createRequests = 0;
+  page.on("request", request => {
+    if (request.method() === "POST" && new URL(request.url()).pathname === "/api/schedules")
+      createRequests += 1;
+  });
+
+  await page.goto("/s/new");
+  await expect(page.getByLabel("每日開始")).toHaveValue("00:00");
+  await expect(page.getByText("時區", { exact: true })).toHaveCount(0);
+  await expect(page.locator('[name="timezone"]')).toHaveCount(0);
+  await expect(page.getByLabel("每日開始")).toHaveAttribute("type", "time");
+  await expect(page.getByLabel("每日結束")).toHaveAttribute("type", "time");
+  await expect(page.getByLabel("每日結束").locator("option")).toHaveCount(0);
+  await expect(page.getByLabel("填寫截止時間")).not.toHaveValue("");
+  const defaultDeadline = await page.getByLabel("填寫截止時間").inputValue();
+  expect(await page.evaluate(value => {
+    const selected = new Date(value);
+    return Math.abs(Date.now() - selected.getTime()) < 90_000;
+  }, defaultDeadline)).toBeTruthy();
+
+  await page.getByRole("button", { name: "建立排程，取得分享連結" }).click();
+  await expect(page.getByText("必填表格請填寫完成", { exact: true })).toBeVisible();
+  expect(createRequests).toBe(0);
+
+  const description = page.getByLabel("補充說明");
+  const initialHeight = await description.evaluate(element => element.getBoundingClientRect().height);
+  await description.fill(Array.from({ length: 12 }, (_, index) => `第 ${index + 1} 行`).join("\n"));
+  const expandedHeight = await description.evaluate(element => element.getBoundingClientRect().height);
+  expect(expandedHeight).toBeGreaterThan(initialHeight);
+  expect(await description.evaluate(element => getComputedStyle(element).overflowY)).toBe("hidden");
+  await description.fill("縮短後的說明");
+  expect(await description.evaluate(element => element.getBoundingClientRect().height)).toBeLessThan(expandedHeight);
+
+  await page.getByLabel("排程名稱").fill("草稿驗收排程");
+  await page.getByLabel("你的顯示名稱").fill("草稿建立者");
+  await page.getByLabel("總人數").fill("6");
+  await description.fill("重新整理後仍應存在");
+  await page.getByLabel("開始日期").fill("2027-10-10");
+  await page.getByLabel("結束日期").fill("2027-10-11");
+  await page.getByLabel("每日開始").fill("08:15");
+  await page.getByLabel("每日結束").fill("10:30");
+  await page.getByLabel("會議時長").selectOption("90");
+  await page.getByLabel("填寫截止時間").fill("2027-10-09T17:45");
+  await expect.poll(() => page.evaluate(key => localStorage.getItem(key), draftKey)).not.toBeNull();
+
+  await page.reload();
+  await expect(page.getByLabel("排程名稱")).toHaveValue("草稿驗收排程");
+  await expect(page.getByLabel("你的顯示名稱")).toHaveValue("草稿建立者");
+  await expect(page.getByLabel("總人數")).toHaveValue("6");
+  await expect(description).toHaveValue("重新整理後仍應存在");
+  await expect(page.getByLabel("開始日期")).toHaveValue("2027-10-10");
+  await expect(page.getByLabel("結束日期")).toHaveValue("2027-10-11");
+  await expect(page.getByLabel("每日開始")).toHaveValue("08:15");
+  await expect(page.getByLabel("每日結束")).toHaveValue("10:30");
+  await expect(page.getByLabel("會議時長")).toHaveValue("90");
+  await expect(page.getByLabel("填寫截止時間")).toHaveValue("2027-10-09T17:45");
+
+  await description.fill("");
+  await page.getByLabel("排程名稱").fill("");
+  await page.getByRole("button", { name: "建立排程，取得分享連結" }).click();
+  await expect(page.getByText("必填表格請填寫完成", { exact: true })).toBeVisible();
+  expect(createRequests).toBe(0);
+  await page.getByLabel("排程名稱").fill("草稿驗收排程");
+
+  await page.route("**/api/schedules", route => {
+    expect(route.request().postDataJSON()).toMatchObject({
+      description: "",
+      timezone: "Asia/Taipei",
+      dailyEndTime: "10:30",
+    });
+    return route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "測試建立失敗" }),
+    });
+  });
+  await page.getByRole("button", { name: "建立排程，取得分享連結" }).click();
+  await expect(page.getByText("測試建立失敗", { exact: true })).toBeVisible();
+  expect(createRequests).toBe(1);
+  await expect(page.getByLabel("排程名稱")).toHaveValue("草稿驗收排程");
+  await expect.poll(() => page.evaluate(key => localStorage.getItem(key), draftKey)).not.toBeNull();
+  await page.unroute("**/api/schedules");
+
+  await page.route("**/api/schedules", route => route.fulfill({
+    status: 201,
+    contentType: "application/json",
+    body: JSON.stringify({ publicId: "draft-test-public-id", adminLink: "/s/draft-test-public-id/manage#token=test" }),
+  }));
+  await page.getByRole("button", { name: "建立排程，取得分享連結" }).click();
+  await expect(page.getByRole("heading", { name: "邀請大家，找個好時間。" })).toBeVisible();
+  expect(createRequests).toBe(2);
+  expect(await page.evaluate(key => localStorage.getItem(key), draftKey)).toBeNull();
+});
 test("desktop and mobile: create, join, submit, automatic voting, close, confirm and calendar", async ({
   page,
   browser,
@@ -250,7 +348,9 @@ test("desktop and mobile: create, join, submit, automatic voting, close, confirm
   await page.getByLabel("結束日期").fill("2027-09-18");
   await page.getByLabel("每日開始").fill("19:00");
   await page.getByLabel("每日結束").fill("21:00");
+  await page.getByLabel("填寫截止時間").fill("");
   await page.getByRole("button", { name: "建立排程，取得分享連結" }).click();
+  await expect(page.getByText("必填表格請填寫完成", { exact: true })).toBeVisible();
   await expect(page.getByText("請設定填寫截止時間。")).toBeVisible();
   await page.getByLabel("填寫截止時間").fill("2027-09-15T18:00");
   await page.getByRole("button", { name: "建立排程，取得分享連結" }).click();
